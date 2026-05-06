@@ -1,8 +1,14 @@
 import { contextBridge } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import { ipcRenderer } from 'electron'
+import type { WorkspaceApi } from '../shared/workspace'
 
-// Custom APIs for renderer
-const api = {}
+const api: WorkspaceApi = {
+  getWorkspaceStatus: () => ipcRenderer.invoke('workspace:get-status'),
+  pickWorkspaceFolder: () => ipcRenderer.invoke('workspace:pick-folder'),
+  initializeWorkspace: (request) => ipcRenderer.invoke('workspace:initialize', request),
+  openWorkspace: (request) => ipcRenderer.invoke('workspace:open', request)
+}
 
 // Use `contextBridge` APIs to expose Electron APIs to
 // renderer only if context isolation is enabled, otherwise
