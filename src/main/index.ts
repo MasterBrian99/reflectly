@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { registerSessionChatIpc } from './session-chat/ipc'
 import { registerWorkspaceIpc } from './workspace/ipc'
 
 function createWindow(): void {
@@ -51,6 +52,7 @@ app.whenReady().then(() => {
   })
 
   registerWorkspaceIpc()
+  registerSessionChatIpc()
 
   createWindow()
 

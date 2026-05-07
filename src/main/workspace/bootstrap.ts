@@ -2,9 +2,10 @@ import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { access, mkdir, stat, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { WorkspaceStatus } from '../../shared/workspace'
+import { getWorkspacePaths } from './paths'
 import { clearWorkspacePath, writeWorkspacePath } from './store'
 
 interface MigrationDefinition {
@@ -18,10 +19,6 @@ interface WorkspaceConfig {
   createdAt: string
 }
 
-const workspaceMetaDir = '.reflectly'
-const configFileName = 'config.json'
-const databaseFileName = 'reflectly.db'
-
 const migrations: MigrationDefinition[] = [
   {
     name: '0001_workspace_meta',
@@ -34,22 +31,39 @@ const migrations: MigrationDefinition[] = [
         schema_version INTEGER NOT NULL
       ) STRICT;
     `
+  },
+  {
+    name: '0002_sessions',
+    sql: `
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS idx_sessions_updated_at
+      ON sessions(updated_at DESC, created_at DESC, id DESC);
+    `
+  },
+  {
+    name: '0003_messages',
+    sql: `
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS idx_messages_session_created_at
+      ON messages(session_id, created_at ASC, id ASC);
+    `
   }
 ]
-
-function getWorkspacePaths(workspacePath: string): {
-  metaDirPath: string
-  configPath: string
-  databasePath: string
-} {
-  const metaDirPath = join(workspacePath, workspaceMetaDir)
-
-  return {
-    metaDirPath,
-    configPath: join(metaDirPath, configFileName),
-    databasePath: join(metaDirPath, databaseFileName)
-  }
-}
 
 async function validateWorkspaceFolder(workspacePath: string): Promise<void> {
   const folderStat = await stat(workspacePath)

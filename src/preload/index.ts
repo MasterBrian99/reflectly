@@ -1,13 +1,17 @@
 import { contextBridge } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { ipcRenderer } from 'electron'
-import type { WorkspaceApi } from '../shared/workspace'
+import type { AppApi } from '../shared/api'
 
-const api: WorkspaceApi = {
+const api: AppApi = {
   getWorkspaceStatus: () => ipcRenderer.invoke('workspace:get-status'),
   pickWorkspaceFolder: () => ipcRenderer.invoke('workspace:pick-folder'),
   initializeWorkspace: (request) => ipcRenderer.invoke('workspace:initialize', request),
-  openWorkspace: (request) => ipcRenderer.invoke('workspace:open', request)
+  openWorkspace: (request) => ipcRenderer.invoke('workspace:open', request),
+  listSessions: () => ipcRenderer.invoke('sessions:list'),
+  createSession: () => ipcRenderer.invoke('sessions:create'),
+  getSession: (request) => ipcRenderer.invoke('sessions:get', request),
+  sendMessage: (request) => ipcRenderer.invoke('chat:send-message', request)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to
