@@ -1,84 +1,61 @@
-import type { MessageRecord } from '../../shared/session-chat'
+import { streamText } from 'ai'
+import type { AppSettings } from '../../shared/app-settings'
+import type { ChatStreamEvent, MessageRecord } from '../../shared/session-chat'
+import { ChatProviderRegistryBuilder } from '../ai/provider-registry'
 import { SessionChatAppError } from './error'
 
-const defaultModel = 'nvidia/nemotron-3-super-120b-a12b:free'
-const defaultBaseUrl = 'https://openrouter.ai/api/v1'
 const systemPrompt =
   'You are Reflectly, a calm and thoughtful journaling assistant. Reply with grounded, concise, supportive reflection. Do not claim to be a therapist or offer crisis instructions unless the user explicitly asks for urgent help.'
 
-interface OpenAiChatCompletionResponse {
-  choices?: Array<{
-    message?: {
-      content?: string | null
+function mapMessages(
+  messages: MessageRecord[]
+): Array<{ role: MessageRecord['role']; content: string }> {
+  return messages.map((message) => ({
+    role: message.role,
+    content: message.content
+  }))
+}
+
+export async function streamAssistantReply(options: {
+  settings: AppSettings
+  messages: MessageRecord[]
+  requestId: string
+  sessionId: string
+  emit: (event: ChatStreamEvent) => void
+}): Promise<string> {
+  const { model } = new ChatProviderRegistryBuilder(options.settings).build()
+
+  const result = streamText({
+    model,
+    system: systemPrompt,
+    messages: mapMessages(options.messages),
+    timeout: {
+      totalMs: 60000,
+      chunkMs: 10000
     }
-  }>
-  error?: {
-    message?: string
-  }
-}
+  })
 
-function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
-}
-
-export async function generateAssistantReply(messages: MessageRecord[]): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim()
-
-  if (!apiKey) {
-    throw new SessionChatAppError(
-      'MODEL_CONFIG_MISSING',
-      'OpenAI is not configured. Set OPENAI_API_KEY and try again.'
-    )
-  }
-
-  const baseUrl = normalizeBaseUrl(process.env.OPENAI_BASE_URL?.trim() || defaultBaseUrl)
-  const model = process.env.OPENAI_MODEL?.trim() || defaultModel
-
-  let response: Response
+  let assistantContent = ''
 
   try {
-    response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: 'system',
-            content: systemPrompt
-          },
-          ...messages.map((message) => ({
-            role: message.role,
-            content: message.content
-          }))
-        ]
+    for await (const delta of result.textStream) {
+      assistantContent += delta
+      options.emit({
+        type: 'delta',
+        requestId: options.requestId,
+        sessionId: options.sessionId,
+        delta
       })
-    })
+    }
   } catch {
     throw new SessionChatAppError(
       'MODEL_REQUEST_FAILED',
-      'Reflectly could not reach the model provider. Try again in a moment.',
+      'Reflectly could not complete the streamed reply. Try again in a moment.',
       true
     )
   }
 
-  const payload = (await response.json().catch(() => ({}))) as OpenAiChatCompletionResponse
-
-  if (!response.ok) {
-    throw new SessionChatAppError(
-      'MODEL_REQUEST_FAILED',
-      payload.error?.message ||
-        'Reflectly could not generate a reply right now. Try again in a moment.',
-      response.status === 429 || response.status >= 500
-    )
-  }
-
-  const assistantContent = payload.choices?.[0]?.message?.content?.trim()
-
-  if (!assistantContent) {
+  if (!assistantContent.trim()) {
     throw new SessionChatAppError(
       'MODEL_RESPONSE_INVALID',
       'The model returned an empty reply. Try again.',

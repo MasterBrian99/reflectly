@@ -32,9 +32,9 @@ export interface SendMessageRequest {
 }
 
 export interface SendMessageSuccess {
+  requestId: string
   session: SessionSummary
   userMessage: MessageRecord
-  assistantMessage: MessageRecord
 }
 
 export type SessionChatErrorCode =
@@ -68,9 +68,31 @@ export interface GetSessionRequest {
   sessionId: string
 }
 
+export type ChatStreamEvent =
+  | {
+      type: 'delta'
+      requestId: string
+      sessionId: string
+      delta: string
+    }
+  | {
+      type: 'complete'
+      requestId: string
+      sessionId: string
+      session: SessionSummary
+      assistantMessage: MessageRecord
+    }
+  | {
+      type: 'error'
+      requestId: string
+      sessionId: string
+      error: SessionChatError
+    }
+
 export interface SessionChatApi {
   listSessions: () => Promise<SessionChatResult<{ sessions: SessionSummary[] }>>
   createSession: () => Promise<SessionChatResult<CreateSessionSuccess>>
   getSession: (request: GetSessionRequest) => Promise<SessionChatResult<SessionDetail>>
   sendMessage: (request: SendMessageRequest) => Promise<SessionChatResult<SendMessageSuccess>>
+  onChatStreamEvent: (listener: (event: ChatStreamEvent) => void) => () => void
 }

@@ -1,9 +1,8 @@
-import { LoaderCircle, SendHorizontal, Sparkles } from 'lucide-react'
-import { useState } from 'react'
+import { ImagePlus, LoaderCircle, Mic, SendHorizontal, Sparkles } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import type { SessionChatError, SessionDetail } from '@shared/session-chat'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 
@@ -12,48 +11,57 @@ type ChatPanelProps = {
   isLoadingSession: boolean
   isSendingMessage: boolean
   sendError: SessionChatError | null
+  streamingAssistantContent: string
   onCreateSession: () => Promise<void>
   onSendMessage: (content: string) => Promise<SessionChatError | null>
 }
 
-function MessageBubble({
+function formatRelativeTime(isoTimestamp: string): string {
+  const timestamp = new Date(isoTimestamp).getTime()
+  const diffMinutes = Math.max(1, Math.round((Date.now() - timestamp) / 60000))
+
+  if (diffMinutes < 60) {
+    return `Session started ${diffMinutes} minute${diffMinutes === 1 ? '' : 's'} ago`
+  }
+
+  const diffHours = Math.round(diffMinutes / 60)
+
+  if (diffHours < 24) {
+    return `Session started ${diffHours} hour${diffHours === 1 ? '' : 's'} ago`
+  }
+
+  const diffDays = Math.round(diffHours / 24)
+  return `Session started ${diffDays} day${diffDays === 1 ? '' : 's'} ago`
+}
+
+function TranscriptBlock({
   role,
   content,
-  createdAt
+  isStreaming = false
 }: {
   role: 'user' | 'assistant'
   content: string
-  createdAt: string
+  isStreaming?: boolean
 }): React.JSX.Element {
   const isUser = role === 'user'
 
   return (
-    <article className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
-      <div
+    <article
+      className={cn('workspace-transcript-block', isUser && 'workspace-transcript-block-user')}
+    >
+      <p
         className={cn(
-          'max-w-[42rem] rounded-[1.5rem] px-4 py-3 shadow-sm',
-          isUser
-            ? 'rounded-br-md bg-primary text-primary-foreground'
-            : 'rounded-bl-md border border-border/80 bg-white/85 text-foreground'
+          'workspace-transcript-copy whitespace-pre-wrap',
+          isUser ? 'not-italic text-foreground' : 'italic text-foreground/95'
         )}
       >
-        <div className="mb-2 flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.16em] opacity-80">
-          <span>{isUser ? 'You' : 'Reflectly'}</span>
-          <span>
-            {new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(
-              new Date(createdAt)
-            )}
-          </span>
-        </div>
-        <p
-          className={cn(
-            'whitespace-pre-wrap text-sm leading-7',
-            isUser ? 'text-primary-foreground' : 'text-foreground'
-          )}
-        >
-          {content}
+        {isUser ? content : `Reflectly: ${content}`}
+      </p>
+      {isStreaming ? (
+        <p className="mt-3 text-xs font-medium uppercase tracking-[0.18em] text-primary">
+          Streaming
         </p>
-      </div>
+      ) : null}
     </article>
   )
 }
@@ -63,10 +71,18 @@ export function ChatPanel({
   isLoadingSession,
   isSendingMessage,
   sendError,
+  streamingAssistantContent,
   onCreateSession,
   onSendMessage
 }: ChatPanelProps): React.JSX.Element {
   const [draft, setDraft] = useState('')
+  const transcriptBottomRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    transcriptBottomRef.current?.scrollIntoView({
+      block: 'end'
+    })
+  }, [detail?.session.id, detail?.messages.length, isLoadingSession, streamingAssistantContent])
 
   async function handleSend(): Promise<void> {
     if (!draft.trim() || !detail || isSendingMessage) {
@@ -81,117 +97,111 @@ export function ChatPanel({
     }
   }
 
+  function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>): void {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault()
+      void handleSend()
+    }
+  }
+
   if (!detail) {
     return (
-      <Card className="flex h-full min-h-[36rem] flex-col items-center justify-center border-white/65 bg-white/70 text-center">
-        <CardHeader className="max-w-xl items-center">
-          <div className="flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
+      <section className="flex h-full min-h-0 flex-col items-center justify-center px-10 text-center">
+        <div className="max-w-xl">
+          <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
             <Sparkles className="size-6" />
           </div>
-          <CardTitle className="mt-2 text-3xl tracking-[-0.03em]">
+          <h2 className="mt-6 text-4xl tracking-[-0.03em] text-foreground">
             Open a session to begin reflecting
-          </CardTitle>
-          <CardDescription className="max-w-md text-base">
-            The next milestone is live now: create a session, send a message, and Reflectly will
-            save both sides of the exchange inside your workspace.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button size="lg" onClick={() => void onCreateSession()}>
+          </h2>
+          <p className="mx-auto mt-4 max-w-md text-base leading-8 text-muted-foreground">
+            Create a session, stream a reply, and keep provider settings separate from the workspace
+            data.
+          </p>
+          <Button size="lg" className="mt-8" onClick={() => void onCreateSession()}>
             Start first session
           </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
     )
   }
 
   return (
-    <div className="grid h-full min-h-[36rem] gap-4 lg:grid-rows-[minmax(0,1fr)_auto]">
-      <Card className="flex min-h-0 flex-col overflow-hidden border-white/65 bg-white/70">
-        <CardHeader className="border-b border-border/70">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="app-kicker">Transcript</p>
-                <Badge variant="secondary">
-                  {detail.session.messageCount}{' '}
-                  {detail.session.messageCount === 1 ? 'message' : 'messages'}
-                </Badge>
-              </div>
-              <CardTitle className="text-[1.6rem]">{detail.session.title}</CardTitle>
-            </div>
+    <section className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="px-16 pt-12 pb-5">
+          <h2 className="text-6xl leading-none font-light tracking-[-0.05em] text-foreground">
+            {detail.session.title}
+          </h2>
+          <p className="mt-5 text-2xl font-light text-muted-foreground">
+            {formatRelativeTime(detail.session.createdAt)}
+          </p>
+        </div>
 
-            {isLoadingSession ? (
-              <Badge variant="secondary" className="gap-2">
-                <LoaderCircle className="size-3.5 animate-spin" />
-                Loading
-              </Badge>
-            ) : null}
-          </div>
-        </CardHeader>
-
-        <CardContent className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-          <div className="space-y-4">
+        <ScrollArea className="workspace-chat-scroll flex-1">
+          <div className="mx-auto flex w-full max-w-4xl flex-col gap-14 px-16 pt-10 pb-14">
             {detail.messages.map((message) => (
-              <MessageBubble
-                key={message.id}
-                role={message.role}
-                content={message.content}
-                createdAt={message.createdAt}
-              />
+              <TranscriptBlock key={message.id} role={message.role} content={message.content} />
             ))}
 
-            {isSendingMessage ? (
-              <article className="flex justify-start">
-                <div className="rounded-[1.5rem] rounded-bl-md border border-border/80 bg-white/85 px-4 py-3 shadow-sm">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <LoaderCircle className="size-4 animate-spin" />
-                    Reflectly is writing back
-                  </div>
+            {streamingAssistantContent ? (
+              <TranscriptBlock role="assistant" content={streamingAssistantContent} isStreaming />
+            ) : null}
+
+            {isSendingMessage && !streamingAssistantContent ? (
+              <article className="workspace-transcript-block">
+                <div className="flex items-center gap-3 text-sm uppercase tracking-[0.18em] text-muted-foreground">
+                  <LoaderCircle className="size-4 animate-spin" />
+                  Reflectly is responding
                 </div>
               </article>
             ) : null}
+
+            <div ref={transcriptBottomRef} />
           </div>
-        </CardContent>
-      </Card>
+        </ScrollArea>
+      </div>
 
-      <Card className="border-white/65 bg-white/78">
-        <CardContent className="p-5">
-          <div className="space-y-4">
-            <Textarea
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              placeholder="Write what’s on your mind. Reflectly saves your message locally before asking for a reply."
-              disabled={isSendingMessage}
-            />
+      <div className="workspace-composer-shell">
+        <div className="workspace-composer-card">
+          <Textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={handleComposerKeyDown}
+            placeholder="Share a reflection..."
+            className="workspace-composer-textarea"
+            disabled={isSendingMessage}
+          />
 
-            {sendError ? (
-              <div className="rounded-[1rem] border border-destructive/20 bg-destructive/8 px-4 py-3 text-sm leading-6 text-destructive">
-                {sendError.message}
-              </div>
-            ) : null}
+          {sendError ? (
+            <div className="px-7 pb-4 text-sm leading-6 text-destructive">{sendError.message}</div>
+          ) : null}
 
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm leading-6 text-muted-foreground">
-                Messages stay inside this workspace. Provider failures keep your saved user turn.
-              </p>
-
-              <Button
-                size="lg"
-                onClick={() => void handleSend()}
-                disabled={isSendingMessage || !draft.trim()}
-              >
-                {isSendingMessage ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : (
-                  <SendHorizontal className="size-4" />
-                )}
-                Send
-              </Button>
+          <div className="workspace-composer-footer">
+            <div className="flex items-center gap-5 text-muted-foreground">
+              <button type="button" className="workspace-composer-icon">
+                <Mic className="size-4.5" />
+              </button>
+              <button type="button" className="workspace-composer-icon">
+                <ImagePlus className="size-4.5" />
+              </button>
+              <div className="h-6 w-px bg-border/80" />
+              <p className="text-base text-muted-foreground">Press Cmd + Enter to save</p>
             </div>
+
+            <Button
+              size="lg"
+              className="h-13 rounded-2xl px-7 text-2xl font-medium"
+              onClick={() => void handleSend()}
+              disabled={isSendingMessage || !draft.trim()}
+            >
+              {isSendingMessage ? <LoaderCircle className="size-5 animate-spin" /> : null}
+              Reflect
+              <SendHorizontal className="size-5" />
+            </Button>
           </div>
-        </CardContent>
-      </Card>
-    </div>
+        </div>
+      </div>
+    </section>
   )
 }

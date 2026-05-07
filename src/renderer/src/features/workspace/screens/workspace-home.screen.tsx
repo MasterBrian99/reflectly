@@ -1,9 +1,10 @@
-import { AlertCircle } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { Bell, RefreshCw, TriangleAlert } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
-import { ChatPanel } from '@/features/chat/components/chat-panel'
-import { SessionList } from '@/features/sessions/components/session-list'
+import { Outlet } from 'react-router-dom'
 import { useSessionShell } from '@/features/sessions/hooks/use-session-shell'
+import { useAppSettings } from '@/features/settings/hooks/use-app-settings'
+import { WorkspaceSidebar } from '@/features/workspace/components/workspace-sidebar'
+import type { WorkspaceShellContext } from '../workspace-shell.types'
 import type { WorkspaceViewStatus } from '../workspace.types'
 
 type WorkspaceHomeScreenProps = {
@@ -12,61 +13,65 @@ type WorkspaceHomeScreenProps = {
 
 export function WorkspaceHomeScreen({ status }: WorkspaceHomeScreenProps): React.JSX.Element {
   const sessionShell = useSessionShell()
+  const appSettings = useAppSettings()
+  const activeStreamingAssistant = sessionShell.streamingAssistant
+
+  const streamingAssistantContent =
+    activeStreamingAssistant &&
+    activeStreamingAssistant.sessionId === sessionShell.activeDetail?.session.id
+      ? activeStreamingAssistant.content
+      : ''
+
+  const outletContext: WorkspaceShellContext = {
+    sessionShell,
+    appSettings,
+    streamingAssistantContent
+  }
 
   return (
-    <main className="app-page">
-      <div className="app-page-inner app-page-inner-shell">
-        <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border/80 pb-5">
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="app-kicker">Workspace</p>
-              <Badge variant="secondary">{status.workspaceName ?? 'Reflectly'}</Badge>
-            </div>
-            <h1 className="text-3xl font-semibold tracking-[-0.03em] text-foreground">
-              Reflective sessions
-            </h1>
-            <p className="app-copy max-w-3xl text-base">
-              Continue past threads, start a fresh session, and keep the transcript anchored to the
-              workspace on this device.
-            </p>
+    <main className="workspace-app-shell">
+      <WorkspaceSidebar
+        workspaceName={status.workspaceName ?? 'Local Workspace'}
+        sessions={sessionShell.sessions}
+        selectedSessionId={sessionShell.selectedSessionId}
+        isBusy={sessionShell.isCreatingSession || sessionShell.isLoading}
+        onCreateSession={sessionShell.createSession}
+        onSelectSession={sessionShell.selectSession}
+      />
+
+      <section className="workspace-main-shell">
+        <header className="workspace-main-topbar">
+          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+            <span>Workspace</span>
+            <span className="text-foreground/50">›</span>
+            <span className="text-foreground">
+              {sessionShell.activeDetail?.session.title ?? status.workspaceName ?? 'Reflectly'}
+            </span>
           </div>
 
-          {status.workspacePath ? (
-            <div className="max-w-md text-right text-sm leading-6 text-muted-foreground">
-              <span className="font-medium text-foreground">Workspace path:</span>{' '}
-              <span className="break-all">{status.workspacePath}</span>
-            </div>
-          ) : null}
+          <div className="flex items-center gap-6">
+            <button type="button" className="workspace-topbar-icon">
+              <RefreshCw className="size-5" />
+            </button>
+            <button type="button" className="workspace-topbar-icon">
+              <Bell className="size-5" />
+            </button>
+            <div className="h-10 w-px bg-border/80" />
+            <div className="workspace-avatar">R</div>
+          </div>
         </header>
 
         {sessionShell.selectionError ? (
-          <Card className="mt-6 border-destructive/25 bg-destructive/8">
+          <Card className="mx-12 mt-4 border-destructive/25 bg-destructive/8">
             <CardContent className="flex items-start gap-3 p-4 text-sm leading-6 text-destructive">
-              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <TriangleAlert className="mt-0.5 size-4 shrink-0" />
               <p>{sessionShell.selectionError}</p>
             </CardContent>
           </Card>
         ) : null}
 
-        <section className="mt-6 grid flex-1 gap-4 xl:grid-cols-[23rem_minmax(0,1fr)]">
-          <SessionList
-            sessions={sessionShell.sessions}
-            selectedSessionId={sessionShell.selectedSessionId}
-            isBusy={sessionShell.isCreatingSession || sessionShell.isLoading}
-            onCreateSession={sessionShell.createSession}
-            onSelectSession={sessionShell.selectSession}
-          />
-
-          <ChatPanel
-            detail={sessionShell.activeDetail}
-            isLoadingSession={sessionShell.isLoadingSession}
-            isSendingMessage={sessionShell.isSendingMessage}
-            sendError={sessionShell.sendError}
-            onCreateSession={sessionShell.createSession}
-            onSendMessage={sessionShell.sendMessage}
-          />
-        </section>
-      </div>
+        <Outlet context={outletContext} />
+      </section>
     </main>
   )
 }

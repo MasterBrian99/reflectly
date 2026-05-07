@@ -4,5 +4,7 @@ export const sessionIpcService = {
   listSessions: () => window.api.listSessions(),
   createSession: () => window.api.createSession(),
   getSession: (request: GetSessionRequest) => window.api.getSession(request),
-  sendMessage: (request: SendMessageRequest) => window.api.sendMessage(request)
+  sendMessage: (request: SendMessageRequest) => window.api.sendMessage(request),
+  onChatStreamEvent: (listener: Parameters<typeof window.api.onChatStreamEvent>[0]) =>
+    window.api.onChatStreamEvent(listener)
 }

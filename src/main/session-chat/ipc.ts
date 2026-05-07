@@ -1,15 +1,18 @@
+import { randomUUID } from 'node:crypto'
 import { ipcMain } from 'electron'
 import type {
+  ChatStreamEvent,
   CreateSessionSuccess,
   GetSessionRequest,
   SendMessageRequest,
   SendMessageSuccess,
   SessionChatResult
 } from '../../shared/session-chat'
+import { readAppSettings } from '../settings/store'
 import { openWorkspace } from '../workspace/bootstrap'
 import { readWorkspacePath } from '../workspace/store'
 import { SessionChatAppError, toSessionChatError } from './error'
-import { generateAssistantReply } from './model-adapter'
+import { streamAssistantReply } from './model-adapter'
 import {
   createSession,
   getSessionDetail,
@@ -114,7 +117,7 @@ export function registerSessionChatIpc(): void {
 
   ipcMain.handle(
     'chat:send-message',
-    async (_, request: SendMessageRequest): Promise<SessionChatResult<SendMessageSuccess>> => {
+    async (event, request: SendMessageRequest): Promise<SessionChatResult<SendMessageSuccess>> => {
       try {
         const workspacePath = await resolveActiveWorkspacePath()
 
@@ -138,56 +141,65 @@ export function registerSessionChatIpc(): void {
           )
         }
 
-        let assistantContent: string
+        const requestId = randomUUID()
+        const settings = await readAppSettings()
 
-        try {
-          assistantContent = await generateAssistantReply(persistedUserState.contextMessages)
-        } catch (error) {
-          const normalizedError = toSessionChatError(error)
-
-          return {
-            ok: false,
-            error: {
-              ...normalizedError,
-              session: persistedUserState.session,
-              userMessage: persistedUserState.userMessage
+        queueMicrotask(() => {
+          void (async () => {
+            const emit = (payload: ChatStreamEvent): void => {
+              event.sender.send('chat:stream-event', payload)
             }
-          }
-        }
 
-        try {
-          const assistantState = persistAssistantMessage(
-            workspacePath,
-            request.sessionId,
-            assistantContent
-          )
+            try {
+              const assistantContent = await streamAssistantReply({
+                settings,
+                messages: persistedUserState.contextMessages,
+                requestId,
+                sessionId: request.sessionId,
+                emit
+              })
+              const assistantState = persistAssistantMessage(
+                workspacePath,
+                request.sessionId,
+                assistantContent
+              )
 
-          if (!assistantState) {
-            throw new SessionChatAppError(
-              'MESSAGE_PERSIST_FAILED',
-              'Reflectly saved your message, but could not save the reply.',
-              true
-            )
-          }
+              if (!assistantState) {
+                throw new SessionChatAppError(
+                  'MESSAGE_PERSIST_FAILED',
+                  'Reflectly saved your message, but could not save the reply.',
+                  true
+                )
+              }
 
-          return {
-            ok: true,
-            data: {
-              session: assistantState.session,
-              userMessage: persistedUserState.userMessage,
-              assistantMessage: assistantState.assistantMessage
+              emit({
+                type: 'complete',
+                requestId,
+                sessionId: request.sessionId,
+                session: assistantState.session,
+                assistantMessage: assistantState.assistantMessage
+              })
+            } catch (error) {
+              emit({
+                type: 'error',
+                requestId,
+                sessionId: request.sessionId,
+                error: {
+                  ...toSessionChatError(error),
+                  session: persistedUserState.session,
+                  userMessage: persistedUserState.userMessage
+                }
+              })
             }
-          }
-        } catch (error) {
-          const normalizedError = toSessionChatError(error)
+          })()
+        })
 
-          return {
-            ok: false,
-            error: {
-              ...normalizedError,
-              session: persistedUserState.session,
-              userMessage: persistedUserState.userMessage
-            }
+        return {
+          ok: true,
+          data: {
+            requestId,
+            session: persistedUserState.session,
+            userMessage: persistedUserState.userMessage
           }
         }
       } catch (error) {

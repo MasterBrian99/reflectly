@@ -1,11 +1,18 @@
 import { startTransition, useEffect, useMemo, useState } from 'react'
 import type {
+  ChatStreamEvent,
   MessageRecord,
   SessionChatError,
   SessionDetail,
   SessionSummary
 } from '@shared/session-chat'
 import { sessionIpcService } from '../services/session-ipc.service'
+
+interface StreamingAssistantState {
+  requestId: string
+  sessionId: string
+  content: string
+}
 
 function sortSessions(sessions: SessionSummary[]): SessionSummary[] {
   return [...sessions].sort((left, right) => {
@@ -44,6 +51,13 @@ function buildDetail(session: SessionSummary, nextMessages: MessageRecord[]): Se
   }
 }
 
+function isMatchingStream(
+  activeStream: StreamingAssistantState | null,
+  event: ChatStreamEvent
+): activeStream is StreamingAssistantState {
+  return Boolean(activeStream && activeStream.requestId === event.requestId)
+}
+
 export function useSessionShell(): {
   sessions: SessionSummary[]
   activeDetail: SessionDetail | null
@@ -54,6 +68,7 @@ export function useSessionShell(): {
   isSendingMessage: boolean
   selectionError: string | null
   sendError: SessionChatError | null
+  streamingAssistant: StreamingAssistantState | null
   createSession: () => Promise<void>
   selectSession: (sessionId: string) => Promise<void>
   sendMessage: (content: string) => Promise<SessionChatError | null>
@@ -67,6 +82,7 @@ export function useSessionShell(): {
   const [isSendingMessage, setIsSendingMessage] = useState(false)
   const [selectionError, setSelectionError] = useState<string | null>(null)
   const [sendError, setSendError] = useState<SessionChatError | null>(null)
+  const [streamingAssistant, setStreamingAssistant] = useState<StreamingAssistantState | null>(null)
 
   const selectedSummary = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
@@ -125,6 +141,54 @@ export function useSessionShell(): {
         }
       })()
     })
+  }, [])
+
+  useEffect(() => {
+    const unsubscribe = sessionIpcService.onChatStreamEvent((event) => {
+      startTransition(() => {
+        setStreamingAssistant((currentStream) => {
+          if (!isMatchingStream(currentStream, event)) {
+            return currentStream
+          }
+
+          if (event.type === 'delta') {
+            return {
+              ...currentStream,
+              content: currentStream.content + event.delta
+            }
+          }
+
+          return null
+        })
+
+        if (event.type === 'complete') {
+          setSessions((currentSessions) => mergeSession(currentSessions, event.session))
+          setActiveDetail((currentDetail) => {
+            if (currentDetail?.session.id !== event.sessionId) {
+              return currentDetail
+            }
+
+            const nextMessages = appendUniqueMessage(currentDetail.messages, event.assistantMessage)
+
+            return buildDetail(event.session, nextMessages)
+          })
+          setIsSendingMessage(false)
+          return
+        }
+
+        if (event.type === 'error') {
+          setSendError(event.error)
+
+          if (event.error.session) {
+            setSessions((currentSessions) => mergeSession(currentSessions, event.error.session!))
+          }
+
+          setIsSendingMessage(false)
+        }
+      })
+    })
+
+    return unsubscribe
   }, [])
 
   async function createSession(): Promise<void> {
@@ -200,16 +264,19 @@ export function useSessionShell(): {
 
     startTransition(() => {
       setSessions((currentSessions) => mergeSession(currentSessions, result.data.session))
+      setStreamingAssistant({
+        requestId: result.data.requestId,
+        sessionId: result.data.session.id,
+        content: ''
+      })
       setActiveDetail((currentDetail) => {
-        const messagesWithUser = appendUniqueMessage(
+        const nextMessages = appendUniqueMessage(
           currentDetail?.messages ?? [],
           result.data.userMessage
         )
-        const nextMessages = appendUniqueMessage(messagesWithUser, result.data.assistantMessage)
         return buildDetail(result.data.session, nextMessages)
       })
     })
-    setIsSendingMessage(false)
 
     return null
   }
@@ -224,6 +291,7 @@ export function useSessionShell(): {
     isSendingMessage,
     selectionError,
     sendError,
+    streamingAssistant,
     createSession,
     selectSession,
     sendMessage
