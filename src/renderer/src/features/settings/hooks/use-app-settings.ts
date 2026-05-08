@@ -21,6 +21,12 @@ export function useAppSettings(): {
   setEmbeddingModelId: (modelId: string) => void
   setEmbeddingApiKey: (value: string) => void
   setEmbeddingBaseUrl: (value: string) => void
+  setAgentActivityShowInChat: (value: boolean) => void
+  setAgentActivityShowModelReasoning: (value: boolean) => void
+  setAgentActivityReasoningEffort: (value: AppSettings['agentActivity']['reasoningEffort']) => void
+  setAgentActivityReasoningSummary: (
+    value: AppSettings['agentActivity']['reasoningSummary']
+  ) => void
   save: () => Promise<void>
 } {
   const [snapshot, setSnapshot] = useState<AppSettingsSnapshot | null>(null)
@@ -168,6 +174,66 @@ export function useAppSettings(): {
     })
   }
 
+  function setAgentActivityShowInChat(value: boolean): void {
+    if (!draft) {
+      return
+    }
+
+    setDraft({
+      ...draft,
+      agentActivity: {
+        ...draft.agentActivity,
+        showInChat: value
+      }
+    })
+  }
+
+  function setAgentActivityShowModelReasoning(value: boolean): void {
+    if (!draft) {
+      return
+    }
+
+    setDraft({
+      ...draft,
+      agentActivity: {
+        ...draft.agentActivity,
+        showModelReasoning: value
+      }
+    })
+  }
+
+  function setAgentActivityReasoningEffort(
+    value: AppSettings['agentActivity']['reasoningEffort']
+  ): void {
+    if (!draft) {
+      return
+    }
+
+    setDraft({
+      ...draft,
+      agentActivity: {
+        ...draft.agentActivity,
+        reasoningEffort: value
+      }
+    })
+  }
+
+  function setAgentActivityReasoningSummary(
+    value: AppSettings['agentActivity']['reasoningSummary']
+  ): void {
+    if (!draft) {
+      return
+    }
+
+    setDraft({
+      ...draft,
+      agentActivity: {
+        ...draft.agentActivity,
+        reasoningSummary: value
+      }
+    })
+  }
+
   async function save(): Promise<void> {
     if (!draft) {
       return
@@ -201,6 +267,10 @@ export function useAppSettings(): {
     setEmbeddingModelId,
     setEmbeddingApiKey,
     setEmbeddingBaseUrl,
+    setAgentActivityShowInChat,
+    setAgentActivityShowModelReasoning,
+    setAgentActivityReasoningEffort,
+    setAgentActivityReasoningSummary,
     save
   }
 }

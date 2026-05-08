@@ -7,6 +7,7 @@ import type {
 import {
   BadgeCheck,
   Bot,
+  ListChecks,
   FolderOpen,
   KeyRound,
   LoaderCircle,
@@ -46,6 +47,14 @@ type SettingsScreenProps = {
   onEmbeddingModelChange: (modelId: string) => void
   onEmbeddingApiKeyChange: (value: string) => void
   onEmbeddingBaseUrlChange: (value: string) => void
+  onAgentActivityShowInChatChange: (value: boolean) => void
+  onAgentActivityShowModelReasoningChange: (value: boolean) => void
+  onAgentActivityReasoningEffortChange: (
+    value: AppSettings['agentActivity']['reasoningEffort']
+  ) => void
+  onAgentActivityReasoningSummaryChange: (
+    value: AppSettings['agentActivity']['reasoningSummary']
+  ) => void
   onSave: () => Promise<void>
 }
 
@@ -249,6 +258,10 @@ export function SettingsScreen({
   onEmbeddingModelChange,
   onEmbeddingApiKeyChange,
   onEmbeddingBaseUrlChange,
+  onAgentActivityShowInChatChange,
+  onAgentActivityShowModelReasoningChange,
+  onAgentActivityReasoningEffortChange,
+  onAgentActivityReasoningSummaryChange,
   onSave
 }: SettingsScreenProps): React.JSX.Element {
   const [displayName, setDisplayName] = useState('Julian Thorne')
@@ -341,6 +354,138 @@ export function SettingsScreen({
                     activeChatProvider.supportsCustomBaseUrl ? onChatBaseUrlChange : undefined
                   }
                 />
+              </section>
+
+              <section className="space-y-4">
+                <SectionHeading icon={<ListChecks className="size-5" />} title="Agent Activity" />
+
+                <Card className="rounded-[2rem] border-border/70 bg-[#fffdf9] shadow-[0_12px_32px_rgba(55,78,75,0.06)]">
+                  <CardContent className="space-y-6 p-6 md:p-8">
+                    <div className="flex items-center justify-between gap-6">
+                      <div className="space-y-2">
+                        <h3 className="text-2xl leading-none tracking-[-0.03em] text-foreground">
+                          Show activity in chat
+                        </h3>
+                        <p className="max-w-2xl text-base leading-7 text-muted-foreground">
+                          Display compact status updates for parsing, memory retrieval, generation,
+                          and tool-like background work while a reply is being created.
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={draft.agentActivity.showInChat}
+                        className="settings-switch"
+                        onClick={() =>
+                          onAgentActivityShowInChatChange(!draft.agentActivity.showInChat)
+                        }
+                      >
+                        <span
+                          className={
+                            draft.agentActivity.showInChat
+                              ? 'settings-switch-thumb settings-switch-thumb-active'
+                              : 'settings-switch-thumb'
+                          }
+                        />
+                      </button>
+                    </div>
+
+                    <Separator />
+
+                    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_14rem_14rem]">
+                      <div className="flex items-center justify-between gap-6 rounded-[1.35rem] bg-[#edf4f1] px-5 py-4">
+                        <div>
+                          <p className="text-lg leading-none text-foreground">
+                            Request model reasoning summaries
+                          </p>
+                          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                            Uses AI SDK provider options where supported. Some models return no
+                            reasoning even when this is enabled.
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={draft.agentActivity.showModelReasoning}
+                          className="settings-switch"
+                          onClick={() =>
+                            onAgentActivityShowModelReasoningChange(
+                              !draft.agentActivity.showModelReasoning
+                            )
+                          }
+                        >
+                          <span
+                            className={
+                              draft.agentActivity.showModelReasoning
+                                ? 'settings-switch-thumb settings-switch-thumb-active'
+                                : 'settings-switch-thumb'
+                            }
+                          />
+                        </button>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="settings-field-label" htmlFor="reasoning-effort">
+                          Reasoning effort
+                        </Label>
+                        <Select
+                          value={draft.agentActivity.reasoningEffort}
+                          onValueChange={(value) =>
+                            onAgentActivityReasoningEffortChange(
+                              value as AppSettings['agentActivity']['reasoningEffort']
+                            )
+                          }
+                        >
+                          <SelectTrigger id="reasoning-effort" className="settings-input">
+                            <SelectValue placeholder="Choose effort" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {['minimal', 'low', 'medium', 'high', 'xhigh'].map((effort) => (
+                              <SelectItem key={effort} value={effort}>
+                                {effort}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="settings-field-label" htmlFor="reasoning-summary">
+                          Summary detail
+                        </Label>
+                        <Select
+                          value={draft.agentActivity.reasoningSummary}
+                          onValueChange={(value) =>
+                            onAgentActivityReasoningSummaryChange(
+                              value as AppSettings['agentActivity']['reasoningSummary']
+                            )
+                          }
+                        >
+                          <SelectTrigger id="reasoning-summary" className="settings-input">
+                            <SelectValue placeholder="Choose summary" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="auto">auto</SelectItem>
+                            <SelectItem value="detailed">detailed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <Button
+                        className="rounded-2xl px-6 text-base"
+                        onClick={() => void onSave()}
+                        disabled={isSaving}
+                      >
+                        {isSaving ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                        Save Activity Settings
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
               </section>
 
               <section className="space-y-4">

@@ -115,6 +115,12 @@ export const defaultAppSettings: AppSettings = {
     providerId: 'openai',
     modelId: 'text-embedding-3-small',
     apiKey: ''
+  },
+  agentActivity: {
+    showInChat: true,
+    showModelReasoning: false,
+    reasoningEffort: 'low',
+    reasoningSummary: 'auto'
   }
 }
 

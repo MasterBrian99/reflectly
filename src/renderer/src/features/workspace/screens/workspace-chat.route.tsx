@@ -3,7 +3,8 @@ import { ChatPanel } from '@/features/chat/components/chat-panel'
 import type { WorkspaceShellContext } from '../workspace-shell.types'
 
 export function WorkspaceChatRoute(): React.JSX.Element {
-  const { sessionShell, streamingAssistantContent } = useOutletContext<WorkspaceShellContext>()
+  const { sessionShell, streamingAssistantContent, activeAgentActivities } =
+    useOutletContext<WorkspaceShellContext>()
 
   return (
     <section className="min-h-0 flex-1 overflow-hidden">
@@ -13,6 +14,9 @@ export function WorkspaceChatRoute(): React.JSX.Element {
         isSendingMessage={sessionShell.isSendingMessage}
         sendError={sessionShell.sendError}
         streamingAssistantContent={streamingAssistantContent}
+        activeAgentActivities={activeAgentActivities}
+        agentActivitiesByMessageId={sessionShell.agentActivitiesByMessageId}
+        clarificationControlsByMessageId={sessionShell.clarificationControlsByMessageId}
         onCreateSession={sessionShell.createSession}
         onSendMessage={sessionShell.sendMessage}
       />

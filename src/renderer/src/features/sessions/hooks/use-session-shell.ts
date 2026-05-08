@@ -1,6 +1,8 @@
-import { startTransition, useEffect, useMemo, useState } from 'react'
+import { startTransition, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  AgentActivityItem,
   ChatStreamEvent,
+  ClarificationPayload,
   MessageRecord,
   SessionChatError,
   SessionDetail,
@@ -13,6 +15,10 @@ interface StreamingAssistantState {
   sessionId: string
   content: string
 }
+
+type ClarificationControlsByMessageId = Record<string, ClarificationPayload>
+type AgentActivitiesByRequestId = Record<string, AgentActivityItem[]>
+type AgentActivitiesByMessageId = Record<string, AgentActivityItem[]>
 
 function sortSessions(sessions: SessionSummary[]): SessionSummary[] {
   return [...sessions].sort((left, right) => {
@@ -44,10 +50,15 @@ function appendUniqueMessage(
   return [...messages, nextMessage]
 }
 
-function buildDetail(session: SessionSummary, nextMessages: MessageRecord[]): SessionDetail {
+function buildDetail(
+  session: SessionSummary,
+  nextMessages: MessageRecord[],
+  agentActivitiesByMessageId: AgentActivitiesByMessageId
+): SessionDetail {
   return {
     session,
-    messages: nextMessages
+    messages: nextMessages,
+    agentActivitiesByMessageId
   }
 }
 
@@ -69,6 +80,9 @@ export function useSessionShell(): {
   selectionError: string | null
   sendError: SessionChatError | null
   streamingAssistant: StreamingAssistantState | null
+  clarificationControlsByMessageId: ClarificationControlsByMessageId
+  agentActivitiesByRequestId: AgentActivitiesByRequestId
+  agentActivitiesByMessageId: AgentActivitiesByMessageId
   createSession: () => Promise<void>
   selectSession: (sessionId: string) => Promise<void>
   sendMessage: (content: string) => Promise<SessionChatError | null>
@@ -83,6 +97,13 @@ export function useSessionShell(): {
   const [selectionError, setSelectionError] = useState<string | null>(null)
   const [sendError, setSendError] = useState<SessionChatError | null>(null)
   const [streamingAssistant, setStreamingAssistant] = useState<StreamingAssistantState | null>(null)
+  const [clarificationControlsByMessageId, setClarificationControlsByMessageId] =
+    useState<ClarificationControlsByMessageId>({})
+  const [agentActivitiesByRequestId, setAgentActivitiesByRequestId] =
+    useState<AgentActivitiesByRequestId>({})
+  const [agentActivitiesByMessageId, setAgentActivitiesByMessageId] =
+    useState<AgentActivitiesByMessageId>({})
+  const agentActivitiesByRequestIdRef = useRef<AgentActivitiesByRequestId>({})
 
   const selectedSummary = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
@@ -103,6 +124,7 @@ export function useSessionShell(): {
 
     startTransition(() => {
       setActiveDetail(result.data)
+      setAgentActivitiesByMessageId(result.data.agentActivitiesByMessageId)
       setSessions((currentSessions) => mergeSession(currentSessions, result.data.session))
       setSelectedSessionId(result.data.session.id)
     })
@@ -132,6 +154,7 @@ export function useSessionShell(): {
 
           if (!nextSelectedSessionId) {
             setActiveDetail(null)
+            setAgentActivitiesByMessageId({})
           }
         })
         setIsLoading(false)
@@ -158,10 +181,48 @@ export function useSessionShell(): {
             }
           }
 
+          if (event.type === 'activity') {
+            return currentStream
+          }
+
           return null
         })
 
+        if (event.type === 'activity') {
+          setAgentActivitiesByRequestId((currentActivities) => {
+            const requestActivities = currentActivities[event.requestId] ?? []
+            const existingIndex = requestActivities.findIndex(
+              (activity) => activity.id === event.activity.id
+            )
+            const nextActivities =
+              existingIndex >= 0
+                ? requestActivities.map((activity, index) =>
+                    index === existingIndex ? event.activity : activity
+                  )
+                : [...requestActivities, event.activity]
+
+            const nextActivitiesByRequestId = {
+              ...currentActivities,
+              [event.requestId]: nextActivities
+            }
+            agentActivitiesByRequestIdRef.current = nextActivitiesByRequestId
+            return nextActivitiesByRequestId
+          })
+          return
+        }
+
         if (event.type === 'complete') {
+          const completedActivities = agentActivitiesByRequestIdRef.current[event.requestId] ?? []
+          setAgentActivitiesByRequestId((currentActivities) => {
+            const nextActivitiesByRequestId = { ...currentActivities }
+            delete nextActivitiesByRequestId[event.requestId]
+            agentActivitiesByRequestIdRef.current = nextActivitiesByRequestId
+            return nextActivitiesByRequestId
+          })
+          setAgentActivitiesByMessageId((currentActivities) => ({
+            ...currentActivities,
+            [event.assistantMessage.id]: completedActivities
+          }))
           setSessions((currentSessions) => mergeSession(currentSessions, event.session))
           setActiveDetail((currentDetail) => {
             if (currentDetail?.session.id !== event.sessionId) {
@@ -170,7 +231,43 @@ export function useSessionShell(): {
 
             const nextMessages = appendUniqueMessage(currentDetail.messages, event.assistantMessage)
 
-            return buildDetail(event.session, nextMessages)
+            return buildDetail(event.session, nextMessages, {
+              ...currentDetail.agentActivitiesByMessageId,
+              [event.assistantMessage.id]: completedActivities
+            })
+          })
+          setIsSendingMessage(false)
+          return
+        }
+
+        if (event.type === 'clarification') {
+          const completedActivities = agentActivitiesByRequestIdRef.current[event.requestId] ?? []
+          setAgentActivitiesByRequestId((currentActivities) => {
+            const nextActivitiesByRequestId = { ...currentActivities }
+            delete nextActivitiesByRequestId[event.requestId]
+            agentActivitiesByRequestIdRef.current = nextActivitiesByRequestId
+            return nextActivitiesByRequestId
+          })
+          setAgentActivitiesByMessageId((currentActivities) => ({
+            ...currentActivities,
+            [event.assistantMessage.id]: completedActivities
+          }))
+          setSessions((currentSessions) => mergeSession(currentSessions, event.session))
+          setClarificationControlsByMessageId((currentControls) => ({
+            ...currentControls,
+            [event.assistantMessage.id]: event.clarification
+          }))
+          setActiveDetail((currentDetail) => {
+            if (currentDetail?.session.id !== event.sessionId) {
+              return currentDetail
+            }
+
+            const nextMessages = appendUniqueMessage(currentDetail.messages, event.assistantMessage)
+
+            return buildDetail(event.session, nextMessages, {
+              ...currentDetail.agentActivitiesByMessageId,
+              [event.assistantMessage.id]: completedActivities
+            })
           })
           setIsSendingMessage(false)
           return
@@ -206,6 +303,7 @@ export function useSessionShell(): {
     startTransition(() => {
       setSessions((currentSessions) => mergeSession(currentSessions, result.data.session))
       setActiveDetail(result.data)
+      setAgentActivitiesByMessageId(result.data.agentActivitiesByMessageId)
       setSelectedSessionId(result.data.session.id)
       setSendError(null)
     })
@@ -254,7 +352,11 @@ export function useSessionShell(): {
               currentDetail?.messages ?? [],
               result.error.userMessage!
             )
-            return buildDetail(result.error.session!, nextMessages)
+            return buildDetail(
+              result.error.session!,
+              nextMessages,
+              currentDetail?.agentActivitiesByMessageId ?? agentActivitiesByMessageId
+            )
           })
         }
       })
@@ -269,12 +371,25 @@ export function useSessionShell(): {
         sessionId: result.data.session.id,
         content: ''
       })
+      setAgentActivitiesByRequestId((currentActivities) => {
+        const nextActivitiesByRequestId = {
+          ...currentActivities,
+          [result.data.requestId]: currentActivities[result.data.requestId] ?? []
+        }
+        agentActivitiesByRequestIdRef.current = nextActivitiesByRequestId
+        return nextActivitiesByRequestId
+      })
+      setClarificationControlsByMessageId({})
       setActiveDetail((currentDetail) => {
         const nextMessages = appendUniqueMessage(
           currentDetail?.messages ?? [],
           result.data.userMessage
         )
-        return buildDetail(result.data.session, nextMessages)
+        return buildDetail(
+          result.data.session,
+          nextMessages,
+          currentDetail?.agentActivitiesByMessageId ?? agentActivitiesByMessageId
+        )
       })
     })
 
@@ -292,6 +407,9 @@ export function useSessionShell(): {
     selectionError,
     sendError,
     streamingAssistant,
+    clarificationControlsByMessageId,
+    agentActivitiesByRequestId,
+    agentActivitiesByMessageId,
     createSession,
     selectSession,
     sendMessage

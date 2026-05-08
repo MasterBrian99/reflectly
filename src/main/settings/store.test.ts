@@ -24,6 +24,12 @@ test('normalizeAppSettings upgrades legacy chat-only settings', () => {
       modelId: 'text-embedding-3-small',
       apiKey: '',
       baseUrl: undefined
+    },
+    agentActivity: {
+      showInChat: true,
+      showModelReasoning: false,
+      reasoningEffort: 'low',
+      reasoningSummary: 'auto'
     }
   })
 })
@@ -51,4 +57,8 @@ test('normalizeAppSettings fills defaults for new chat and embedding sections', 
   assert.equal(normalized.embeddings.modelId, 'text-embedding-3-small')
   assert.equal(normalized.embeddings.apiKey, 'embed-key')
   assert.equal(normalized.embeddings.baseUrl, 'http://localhost:1234/v1')
+  assert.equal(normalized.agentActivity.showInChat, true)
+  assert.equal(normalized.agentActivity.showModelReasoning, false)
+  assert.equal(normalized.agentActivity.reasoningEffort, 'low')
+  assert.equal(normalized.agentActivity.reasoningSummary, 'auto')
 })

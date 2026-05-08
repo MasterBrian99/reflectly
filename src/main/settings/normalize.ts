@@ -1,4 +1,5 @@
 import type {
+  AgentActivitySettings,
   AppSettings,
   ChatProviderId,
   ChatSettings,
@@ -52,6 +53,29 @@ function normalizeEmbeddingSettings(settings?: Partial<EmbeddingSettings>): Embe
   }
 }
 
+function normalizeAgentActivitySettings(
+  settings?: Partial<AgentActivitySettings>
+): AgentActivitySettings {
+  const reasoningEfforts = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const
+  const reasoningSummaries = ['auto', 'detailed'] as const
+
+  return {
+    showInChat: settings?.showInChat ?? defaultAppSettings.agentActivity.showInChat,
+    showModelReasoning:
+      settings?.showModelReasoning ?? defaultAppSettings.agentActivity.showModelReasoning,
+    reasoningEffort: reasoningEfforts.includes(
+      settings?.reasoningEffort as (typeof reasoningEfforts)[number]
+    )
+      ? (settings?.reasoningEffort as AgentActivitySettings['reasoningEffort'])
+      : defaultAppSettings.agentActivity.reasoningEffort,
+    reasoningSummary: reasoningSummaries.includes(
+      settings?.reasoningSummary as (typeof reasoningSummaries)[number]
+    )
+      ? (settings?.reasoningSummary as AgentActivitySettings['reasoningSummary'])
+      : defaultAppSettings.agentActivity.reasoningSummary
+  }
+}
+
 function normalizeLegacyAppSettings(settings: LegacyAppSettings): AppSettings {
   const providerId = settings.activeProviderId ?? defaultAppSettings.chat.providerId
   const provider = getChatProviderOption(providerId)
@@ -63,7 +87,8 @@ function normalizeLegacyAppSettings(settings: LegacyAppSettings): AppSettings {
       apiKey: settings.providerApiKeys?.[providerId] ?? '',
       baseUrl: settings.customBaseUrl
     }),
-    embeddings: normalizeEmbeddingSettings(defaultAppSettings.embeddings)
+    embeddings: normalizeEmbeddingSettings(defaultAppSettings.embeddings),
+    agentActivity: normalizeAgentActivitySettings(defaultAppSettings.agentActivity)
   }
 }
 
@@ -76,6 +101,7 @@ export function normalizeAppSettings(
 
   return {
     chat: normalizeChatSettings(settings?.chat),
-    embeddings: normalizeEmbeddingSettings(settings?.embeddings)
+    embeddings: normalizeEmbeddingSettings(settings?.embeddings),
+    agentActivity: normalizeAgentActivitySettings(settings?.agentActivity)
   }
 }

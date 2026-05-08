@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import type { MessageRecord, SessionDetail, SessionSummary } from '../../shared/session-chat'
+import type {
+  AgentActivityItem,
+  MessageRecord,
+  SessionDetail,
+  SessionSummary
+} from '../../shared/session-chat'
 import { openWorkspaceDatabase } from '../workspace/database'
 
 const defaultSessionTitle = 'New session'
@@ -21,6 +26,16 @@ interface MessageRow {
   created_at: string
 }
 
+interface AgentActivityRow {
+  assistant_message_id: string
+  activity_id: string
+  kind: AgentActivityItem['kind']
+  status: AgentActivityItem['status']
+  label: string
+  detail: string | null
+  created_at: string
+}
+
 function mapSessionSummary(row: SessionSummaryRow): SessionSummary {
   return {
     id: row.id,
@@ -37,6 +52,17 @@ function mapMessageRecord(row: MessageRow): MessageRecord {
     sessionId: row.session_id,
     role: row.role,
     content: row.content,
+    createdAt: row.created_at
+  }
+}
+
+function mapAgentActivity(row: AgentActivityRow): AgentActivityItem {
+  return {
+    id: row.activity_id,
+    kind: row.kind,
+    status: row.status,
+    label: row.label,
+    ...(row.detail ? { detail: row.detail } : {}),
     createdAt: row.created_at
   }
 }
@@ -120,7 +146,8 @@ export function createSession(workspacePath: string): SessionDetail {
         updatedAt: now,
         messageCount: 0
       },
-      messages: []
+      messages: [],
+      agentActivitiesByMessageId: {}
     }
   } finally {
     database.close()
@@ -148,9 +175,36 @@ export function getSessionDetail(workspacePath: string, sessionId: string): Sess
       )
       .all(sessionId) as unknown as MessageRow[]
 
+    const activityRows = database
+      .prepare(
+        `
+          SELECT
+            assistant_message_id,
+            activity_id,
+            kind,
+            status,
+            label,
+            detail,
+            created_at
+          FROM message_agent_activities
+          WHERE session_id = ?
+          ORDER BY assistant_message_id ASC, item_order ASC, created_at ASC, activity_id ASC
+        `
+      )
+      .all(sessionId) as unknown as AgentActivityRow[]
+    const agentActivitiesByMessageId: Record<string, AgentActivityItem[]> = {}
+
+    for (const row of activityRows) {
+      agentActivitiesByMessageId[row.assistant_message_id] = [
+        ...(agentActivitiesByMessageId[row.assistant_message_id] ?? []),
+        mapAgentActivity(row)
+      ]
+    }
+
     return {
       session,
-      messages: messages.map(mapMessageRecord)
+      messages: messages.map(mapMessageRecord),
+      agentActivitiesByMessageId
     }
   } finally {
     database.close()
@@ -313,6 +367,85 @@ export function persistAssistantMessage(
         content,
         createdAt: now
       }
+    }
+  } finally {
+    database.close()
+  }
+}
+
+export function upsertMessageAgentActivities(
+  workspacePath: string,
+  assistantMessageId: string,
+  activities: AgentActivityItem[]
+): void {
+  if (!activities.length) {
+    return
+  }
+
+  const database = openWorkspaceDatabase(workspacePath)
+
+  try {
+    const messageRow = database
+      .prepare(
+        `
+          SELECT session_id, role
+          FROM messages
+          WHERE id = ?
+          LIMIT 1
+        `
+      )
+      .get(assistantMessageId) as { session_id: string; role: MessageRecord['role'] } | undefined
+
+    if (!messageRow || messageRow.role !== 'assistant') {
+      return
+    }
+
+    const now = new Date().toISOString()
+    const deleteExistingActivities = database.prepare(
+      'DELETE FROM message_agent_activities WHERE assistant_message_id = ?'
+    )
+    const insertActivity = database.prepare(
+      `
+        INSERT INTO message_agent_activities (
+          assistant_message_id,
+          activity_id,
+          session_id,
+          kind,
+          status,
+          label,
+          detail,
+          created_at,
+          item_order,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+    )
+
+    database.exec('BEGIN')
+
+    try {
+      deleteExistingActivities.run(assistantMessageId)
+
+      activities.forEach((activity, index) => {
+        insertActivity.run(
+          assistantMessageId,
+          activity.id,
+          messageRow.session_id,
+          activity.kind,
+          activity.status,
+          activity.label,
+          activity.detail ?? null,
+          activity.createdAt,
+          index,
+          now
+        )
+      })
+
+      database.exec('COMMIT')
+    } catch (error) {
+      database.exec('ROLLBACK')
+      throw error
     }
   } finally {
     database.close()

@@ -70,6 +70,7 @@ function buildChatModel(
       return createOpenAICompatible({
         name: 'custom-openai-compatible',
         apiKey: settings.chat.apiKey.trim(),
+
         baseURL:
           getProviderBaseUrl(provider, settings.chat.baseUrl) ?? provider.defaultBaseUrl ?? ''
       }).languageModel(modelId)

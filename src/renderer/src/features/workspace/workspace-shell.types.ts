@@ -5,4 +5,5 @@ export interface WorkspaceShellContext {
   sessionShell: ReturnType<typeof useSessionShell>
   appSettings: ReturnType<typeof useAppSettings>
   streamingAssistantContent: string
+  activeAgentActivities: ReturnType<typeof useSessionShell>['agentActivitiesByRequestId'][string]
 }

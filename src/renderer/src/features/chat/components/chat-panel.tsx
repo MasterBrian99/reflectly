@@ -1,6 +1,21 @@
-import { ImagePlus, LoaderCircle, Mic, SendHorizontal, Sparkles } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
-import type { SessionChatError, SessionDetail } from '@shared/session-chat'
+import {
+  CheckCircle2,
+  ChevronDown,
+  CircleAlert,
+  CircleDashed,
+  ImagePlus,
+  LoaderCircle,
+  Mic,
+  SendHorizontal,
+  Sparkles
+} from 'lucide-react'
+import { Fragment, useEffect, useRef, useState } from 'react'
+import type {
+  AgentActivityItem,
+  ClarificationPayload,
+  SessionChatError,
+  SessionDetail
+} from '@shared/session-chat'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
@@ -12,6 +27,9 @@ type ChatPanelProps = {
   isSendingMessage: boolean
   sendError: SessionChatError | null
   streamingAssistantContent: string
+  activeAgentActivities: AgentActivityItem[]
+  agentActivitiesByMessageId: Record<string, AgentActivityItem[]>
+  clarificationControlsByMessageId: Record<string, ClarificationPayload>
   onCreateSession: () => Promise<void>
   onSendMessage: (content: string) => Promise<SessionChatError | null>
 }
@@ -37,13 +55,23 @@ function formatRelativeTime(isoTimestamp: string): string {
 function TranscriptBlock({
   role,
   content,
-  isStreaming = false
+  isStreaming = false,
+  clarification,
+  isAnsweringClarification = false,
+  onClarificationAnswer
 }: {
   role: 'user' | 'assistant'
   content: string
   isStreaming?: boolean
+  clarification?: ClarificationPayload
+  isAnsweringClarification?: boolean
+  onClarificationAnswer?: (content: string) => Promise<void>
 }): React.JSX.Element {
   const isUser = role === 'user'
+
+  async function handleScaleAnswer(value: number): Promise<void> {
+    await onClarificationAnswer?.(`${value} out of 10`)
+  }
 
   return (
     <article
@@ -62,7 +90,118 @@ function TranscriptBlock({
           Streaming
         </p>
       ) : null}
+
+      {!isUser && clarification?.questionType === 'choice' && clarification.options?.length ? (
+        <div className="mt-5 flex flex-wrap gap-2">
+          {clarification.options.map((option) => (
+            <Button
+              key={option}
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isAnsweringClarification}
+              onClick={() => void onClarificationAnswer?.(option)}
+              className="rounded-xl bg-white/75"
+            >
+              {option}
+            </Button>
+          ))}
+        </div>
+      ) : null}
+
+      {!isUser && clarification?.questionType === 'scale' ? (
+        <div className="mt-5 max-w-xl">
+          <div className="grid grid-cols-10 gap-1.5">
+            {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => (
+              <Button
+                key={value}
+                type="button"
+                variant="outline"
+                size="xs"
+                disabled={isAnsweringClarification}
+                onClick={() => void handleScaleAnswer(value)}
+                className="h-9 rounded-lg bg-white/75 px-0"
+              >
+                {value}
+              </Button>
+            ))}
+          </div>
+          {clarification.scaleAnchors ? (
+            <div className="mt-2 flex justify-between gap-4 text-xs leading-5 text-muted-foreground">
+              <span>{clarification.scaleAnchors[0]}</span>
+              <span className="text-right">{clarification.scaleAnchors[1]}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </article>
+  )
+}
+
+function AgentActivityAccordion({
+  activities,
+  defaultOpen = true
+}: {
+  activities: AgentActivityItem[]
+  defaultOpen?: boolean
+}): React.JSX.Element | null {
+  const [isOpen, setIsOpen] = useState(defaultOpen)
+
+  if (!activities.length) {
+    return null
+  }
+
+  const runningCount = activities.filter((activity) => activity.status === 'running').length
+
+  return (
+    <div className="workspace-agent-activity">
+      <button
+        type="button"
+        className="workspace-agent-activity-trigger"
+        onClick={() => setIsOpen((currentValue) => !currentValue)}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          {runningCount > 0 ? (
+            <LoaderCircle className="size-4 shrink-0 animate-spin text-primary" />
+          ) : (
+            <CheckCircle2 className="size-4 shrink-0 text-success" />
+          )}
+          <span className="truncate">
+            Agent activity {runningCount > 0 ? `(${runningCount} running)` : 'complete'}
+          </span>
+        </span>
+        <ChevronDown
+          className={cn('size-4 shrink-0 transition-transform', isOpen && 'rotate-180')}
+        />
+      </button>
+
+      {isOpen ? (
+        <div className="workspace-agent-activity-body">
+          {activities.map((activity) => (
+            <div key={activity.id} className="workspace-agent-activity-row">
+              {activity.status === 'running' ? (
+                <CircleDashed className="mt-0.5 size-4 shrink-0 animate-spin text-primary" />
+              ) : activity.status === 'error' ? (
+                <CircleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
+              ) : (
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
+              )}
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">{activity.label}</p>
+                  <span className="rounded-full bg-[#edf4f1] px-2 py-0.5 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-primary">
+                    {activity.kind}
+                  </span>
+                </div>
+                {activity.detail ? (
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">{activity.detail}</p>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -72,6 +211,9 @@ export function ChatPanel({
   isSendingMessage,
   sendError,
   streamingAssistantContent,
+  activeAgentActivities,
+  agentActivitiesByMessageId,
+  clarificationControlsByMessageId,
   onCreateSession,
   onSendMessage
 }: ChatPanelProps): React.JSX.Element {
@@ -140,16 +282,38 @@ export function ChatPanel({
 
         <ScrollArea className="workspace-chat-scroll flex-1">
           <div className="mx-auto flex w-full max-w-4xl flex-col gap-14 px-16 pt-10 pb-14">
-            {detail.messages.map((message) => (
-              <TranscriptBlock key={message.id} role={message.role} content={message.content} />
-            ))}
+            {detail.messages.map((message) => {
+              const persistedActivities =
+                message.role === 'assistant' ? (agentActivitiesByMessageId[message.id] ?? []) : []
+
+              return (
+                <Fragment key={message.id}>
+                  {persistedActivities.length ? (
+                    <AgentActivityAccordion activities={persistedActivities} defaultOpen={false} />
+                  ) : null}
+                  <TranscriptBlock
+                    role={message.role}
+                    content={message.content}
+                    clarification={clarificationControlsByMessageId[message.id]}
+                    isAnsweringClarification={isSendingMessage}
+                    onClarificationAnswer={async (content) => {
+                      await onSendMessage(content)
+                    }}
+                  />
+                </Fragment>
+              )
+            })}
 
             {streamingAssistantContent ? (
-              <TranscriptBlock role="assistant" content={streamingAssistantContent} isStreaming />
+              <>
+                <AgentActivityAccordion activities={activeAgentActivities} />
+                <TranscriptBlock role="assistant" content={streamingAssistantContent} isStreaming />
+              </>
             ) : null}
 
             {isSendingMessage && !streamingAssistantContent ? (
               <article className="workspace-transcript-block">
+                <AgentActivityAccordion activities={activeAgentActivities} />
                 <div className="flex items-center gap-3 text-sm uppercase tracking-[0.18em] text-muted-foreground">
                   <LoaderCircle className="size-4 animate-spin" />
                   Reflectly is responding

@@ -19,12 +19,10 @@ export interface MessageRecord {
 export interface SessionDetail {
   session: SessionSummary
   messages: MessageRecord[]
+  agentActivitiesByMessageId: Record<string, AgentActivityItem[]>
 }
 
-export interface CreateSessionSuccess {
-  session: SessionSummary
-  messages: MessageRecord[]
-}
+export type CreateSessionSuccess = SessionDetail
 
 export interface SendMessageRequest {
   sessionId: string
@@ -35,6 +33,25 @@ export interface SendMessageSuccess {
   requestId: string
   session: SessionSummary
   userMessage: MessageRecord
+}
+
+export interface ClarificationPayload {
+  questionType: 'open' | 'choice' | 'scale'
+  questionText: string
+  options?: string[]
+  scaleAnchors?: [string, string]
+}
+
+export type AgentActivityKind = 'stage' | 'reasoning' | 'retrieval' | 'tool'
+export type AgentActivityStatus = 'running' | 'complete' | 'skipped' | 'error'
+
+export interface AgentActivityItem {
+  id: string
+  kind: AgentActivityKind
+  status: AgentActivityStatus
+  label: string
+  detail?: string
+  createdAt: string
 }
 
 export type SessionChatErrorCode =
@@ -76,11 +93,25 @@ export type ChatStreamEvent =
       delta: string
     }
   | {
+      type: 'activity'
+      requestId: string
+      sessionId: string
+      activity: AgentActivityItem
+    }
+  | {
       type: 'complete'
       requestId: string
       sessionId: string
       session: SessionSummary
       assistantMessage: MessageRecord
+    }
+  | {
+      type: 'clarification'
+      requestId: string
+      sessionId: string
+      session: SessionSummary
+      assistantMessage: MessageRecord
+      clarification: ClarificationPayload
     }
   | {
       type: 'error'

@@ -21,11 +21,15 @@ export function WorkspaceHomeScreen({ status }: WorkspaceHomeScreenProps): React
     activeStreamingAssistant.sessionId === sessionShell.activeDetail?.session.id
       ? activeStreamingAssistant.content
       : ''
+  const activeAgentActivities = activeStreamingAssistant
+    ? (sessionShell.agentActivitiesByRequestId[activeStreamingAssistant.requestId] ?? [])
+    : []
 
   const outletContext: WorkspaceShellContext = {
     sessionShell,
     appSettings,
-    streamingAssistantContent
+    streamingAssistantContent,
+    activeAgentActivities
   }
 
   return (

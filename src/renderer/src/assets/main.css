@@ -316,6 +316,24 @@
     letter-spacing: -0.01em;
   }
 
+  .workspace-agent-activity {
+    @apply mb-5 w-full max-w-xl rounded-xl border bg-white/70;
+    border-color: rgb(94 142 132 / 16%);
+  }
+
+  .workspace-agent-activity-trigger {
+    @apply flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium text-foreground/82;
+  }
+
+  .workspace-agent-activity-body {
+    @apply border-t px-4 py-3;
+    border-color: rgb(94 142 132 / 12%);
+  }
+
+  .workspace-agent-activity-row {
+    @apply flex gap-3 py-2;
+  }
+
   .workspace-composer-shell {
     @apply shrink-0 px-12 pb-8;
   }
@@ -350,5 +368,23 @@
 
   .settings-input {
     @apply h-12 rounded-2xl border-border/75 bg-white text-base shadow-none;
+  }
+
+  .settings-switch {
+    @apply flex h-8 w-14 shrink-0 items-center rounded-full border px-1 transition-colors;
+    border-color: rgb(94 142 132 / 16%);
+    background: #edf4f1;
+  }
+
+  .settings-switch[aria-checked='true'] {
+    @apply bg-primary;
+  }
+
+  .settings-switch-thumb {
+    @apply size-6 rounded-full bg-white shadow-sm transition-transform;
+  }
+
+  .settings-switch-thumb-active {
+    transform: translateX(1.5rem);
   }
 }

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { ipcMain } from 'electron'
 import type {
+  AgentActivityItem,
   ChatStreamEvent,
   CreateSessionSuccess,
   GetSessionRequest,
@@ -12,6 +13,14 @@ import { getSessionSummary } from '../memory/repository'
 import { MemoryRetrievalService } from '../memory/retrieval'
 import { writeSessionMemory } from '../memory/write-back'
 import { readAppSettings } from '../settings/store'
+import { applyClarificationRules } from '../stage1/clarification'
+import { runStage1Parser } from '../stage1/parser'
+import {
+  countRecentClarificationLoops,
+  insertClarificationRequest,
+  resolveLatestPendingClarificationRequest,
+  upsertStage1ParseOutput
+} from '../stage1/repository'
 import { openWorkspace } from '../workspace/bootstrap'
 import { readWorkspacePath } from '../workspace/store'
 import { SessionChatAppError, toSessionChatError } from './error'
@@ -21,7 +30,8 @@ import {
   getSessionDetail,
   listSessions,
   persistAssistantMessage,
-  persistUserMessageAndLoadContext
+  persistUserMessageAndLoadContext,
+  upsertMessageAgentActivities
 } from './repository'
 
 const memoryRetrievalService = new MemoryRetrievalService()
@@ -53,6 +63,13 @@ function failureResult<T>(error: unknown): SessionChatResult<T> {
   return {
     ok: false,
     error: toSessionChatError(error)
+  }
+}
+
+function createActivity(input: Omit<AgentActivityItem, 'createdAt'>): AgentActivityItem {
+  return {
+    ...input,
+    createdAt: new Date().toISOString()
   }
 }
 
@@ -146,31 +163,181 @@ export function registerSessionChatIpc(): void {
           )
         }
 
+        resolveLatestPendingClarificationRequest(
+          workspacePath,
+          request.sessionId,
+          persistedUserState.userMessage.id
+        )
+
         const requestId = randomUUID()
         const settings = await readAppSettings()
 
         queueMicrotask(() => {
           void (async () => {
+            const activityItemsById = new Map<string, AgentActivityItem>()
             const emit = (payload: ChatStreamEvent): void => {
+              if (payload.type === 'activity') {
+                activityItemsById.set(payload.activity.id, payload.activity)
+              }
+
               event.sender.send('chat:stream-event', payload)
+            }
+            const persistBufferedActivities = (assistantMessageId: string): void => {
+              if (!activityItemsById.size) {
+                return
+              }
+
+              try {
+                upsertMessageAgentActivities(
+                  workspacePath,
+                  assistantMessageId,
+                  Array.from(activityItemsById.values())
+                )
+              } catch (error) {
+                console.error('Agent activity persistence failed.', error)
+              }
+            }
+            const emitActivity = (input: Omit<AgentActivityItem, 'createdAt'>): void => {
+              if (!settings.agentActivity.showInChat) {
+                return
+              }
+
+              emit({
+                type: 'activity',
+                requestId,
+                sessionId: request.sessionId,
+                activity: createActivity(input)
+              })
             }
 
             try {
               const currentSessionSummary = getSessionSummary(workspacePath, request.sessionId)
+              emitActivity({
+                id: 'stage1-parse',
+                kind: 'reasoning',
+                status: 'running',
+                label: 'Parsing the message',
+                detail: 'Extracting tone, intent, context gaps, and risk markers.'
+              })
+              const rawStage1Output = await runStage1Parser({
+                settings,
+                userMessage: persistedUserState.userMessage,
+                contextMessages: persistedUserState.contextMessages,
+                currentSessionSummary
+              })
+              const stage1Output = applyClarificationRules(rawStage1Output, {
+                recentLoopCount: countRecentClarificationLoops(workspacePath, request.sessionId)
+              })
+
+              upsertStage1ParseOutput(workspacePath, stage1Output)
+              emitActivity({
+                id: 'stage1-parse',
+                kind: 'reasoning',
+                status: 'complete',
+                label: 'Parsed the message',
+                detail: stage1Output.shouldClarify
+                  ? 'A clarification would materially change the next response.'
+                  : 'Enough context is available to continue.'
+              })
+
+              if (stage1Output.shouldClarify && stage1Output.clarification) {
+                emitActivity({
+                  id: 'clarification',
+                  kind: 'stage',
+                  status: 'running',
+                  label: 'Preparing a clarification',
+                  detail: 'Saving one focused question in the transcript.'
+                })
+                const assistantState = persistAssistantMessage(
+                  workspacePath,
+                  request.sessionId,
+                  stage1Output.clarification.questionText
+                )
+
+                if (!assistantState) {
+                  throw new SessionChatAppError(
+                    'MESSAGE_PERSIST_FAILED',
+                    'Reflectly saved your message, but could not save the clarification question.',
+                    true
+                  )
+                }
+
+                const clarificationRequest = insertClarificationRequest(workspacePath, {
+                  sessionId: request.sessionId,
+                  sourceMessageId: persistedUserState.userMessage.id,
+                  assistantMessageId: assistantState.assistantMessage.id,
+                  clarification: stage1Output.clarification
+                })
+
+                emitActivity({
+                  id: 'clarification',
+                  kind: 'stage',
+                  status: 'complete',
+                  label: 'Clarification ready',
+                  detail: 'The next user message can resolve this question.'
+                })
+                persistBufferedActivities(assistantState.assistantMessage.id)
+                emit({
+                  type: 'clarification',
+                  requestId,
+                  sessionId: request.sessionId,
+                  session: assistantState.session,
+                  assistantMessage: assistantState.assistantMessage,
+                  clarification: {
+                    questionType: clarificationRequest.questionType,
+                    questionText: clarificationRequest.questionText,
+                    options: clarificationRequest.options,
+                    scaleAnchors: clarificationRequest.scaleAnchors
+                  }
+                })
+                return
+              }
+
+              emitActivity({
+                id: 'memory-retrieval',
+                kind: 'retrieval',
+                status: 'running',
+                label: 'Searching memory',
+                detail: 'Looking for relevant workspace context before generation.'
+              })
               const retrievedMemory = await memoryRetrievalService.retrieve({
                 workspacePath,
                 settings,
                 activeSessionId: request.sessionId,
                 queryText: persistedUserState.userMessage.content
               })
+              emitActivity({
+                id: 'memory-retrieval',
+                kind: 'retrieval',
+                status: 'complete',
+                label: 'Memory search complete',
+                detail: retrievedMemory.length
+                  ? `${retrievedMemory.length} relevant item${retrievedMemory.length === 1 ? '' : 's'} found.`
+                  : 'No relevant memory was found.'
+              })
+              emitActivity({
+                id: 'assistant-generation',
+                kind: 'stage',
+                status: 'running',
+                label: 'Generating response',
+                detail: 'Streaming the assistant reply.'
+              })
               const assistantContent = await streamAssistantReply({
                 settings,
                 messages: persistedUserState.contextMessages,
                 currentSessionSummary: currentSessionSummary?.summaryText ?? null,
                 retrievedMemory,
+                stage1Output,
                 requestId,
                 sessionId: request.sessionId,
                 emit
+              })
+              emitActivity({
+                id: 'assistant-generation',
+                kind: 'stage',
+                status: 'complete',
+                label: 'Generated response',
+                detail: 'The assistant reply finished streaming.'
               })
               const assistantState = persistAssistantMessage(
                 workspacePath,
@@ -187,6 +354,13 @@ export function registerSessionChatIpc(): void {
               }
 
               try {
+                emitActivity({
+                  id: 'memory-write-back',
+                  kind: 'tool',
+                  status: 'running',
+                  label: 'Updating memory',
+                  detail: 'Summarizing the exchange for future retrieval.'
+                })
                 await writeSessionMemory({
                   workspacePath,
                   settings,
@@ -195,10 +369,25 @@ export function registerSessionChatIpc(): void {
                   assistantMessage: assistantState.assistantMessage,
                   previousSessionSummary: currentSessionSummary
                 })
+                emitActivity({
+                  id: 'memory-write-back',
+                  kind: 'tool',
+                  status: 'complete',
+                  label: 'Memory updated',
+                  detail: 'The exchange was saved into local memory.'
+                })
               } catch (error) {
                 console.error('Memory write-back failed after assistant persistence.', error)
+                emitActivity({
+                  id: 'memory-write-back',
+                  kind: 'tool',
+                  status: 'error',
+                  label: 'Memory update failed',
+                  detail: 'The reply was saved, but memory write-back did not complete.'
+                })
               }
 
+              persistBufferedActivities(assistantState.assistantMessage.id)
               emit({
                 type: 'complete',
                 requestId,

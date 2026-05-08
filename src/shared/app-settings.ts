@@ -31,9 +31,17 @@ export interface ProviderSettings<PROVIDER_ID extends string> {
 export type ChatSettings = ProviderSettings<ChatProviderId>
 export type EmbeddingSettings = ProviderSettings<EmbeddingProviderId>
 
+export interface AgentActivitySettings {
+  showInChat: boolean
+  showModelReasoning: boolean
+  reasoningEffort: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+  reasoningSummary: 'auto' | 'detailed'
+}
+
 export interface AppSettings {
   chat: ChatSettings
   embeddings: EmbeddingSettings
+  agentActivity: AgentActivitySettings
 }
 
 export interface AppSettingsSnapshot {

@@ -84,6 +84,12 @@ test('MemoryRetrievalService falls back to transcript-only mode when embeddings 
         providerId: 'openai',
         modelId: 'text-embedding-3-small',
         apiKey: ''
+      },
+      agentActivity: {
+        showInChat: true,
+        showModelReasoning: false,
+        reasoningEffort: 'low',
+        reasoningSummary: 'auto'
       }
     }
   })

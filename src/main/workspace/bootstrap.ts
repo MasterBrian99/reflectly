@@ -104,6 +104,83 @@ const migrations: MigrationDefinition[] = [
       CREATE INDEX IF NOT EXISTS idx_session_summaries_updated_at
       ON session_summaries(updated_at DESC, session_id DESC);
     `
+  },
+  {
+    name: '0006_stage1_parse_outputs',
+    sql: `
+      CREATE TABLE IF NOT EXISTS stage1_parse_outputs (
+        message_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        schema_version INTEGER NOT NULL,
+        summary TEXT NOT NULL,
+        emotional_tone TEXT NOT NULL,
+        intent TEXT NOT NULL,
+        entities TEXT NOT NULL,
+        goal_hints TEXT NOT NULL,
+        context_gaps TEXT NOT NULL,
+        risk_markers TEXT NOT NULL,
+        should_clarify INTEGER NOT NULL CHECK(should_clarify IN (0, 1)),
+        clarification TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS idx_stage1_parse_outputs_session_created_at
+      ON stage1_parse_outputs(session_id, created_at DESC, message_id DESC);
+    `
+  },
+  {
+    name: '0007_clarification_requests',
+    sql: `
+      CREATE TABLE IF NOT EXISTS clarification_requests (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        source_message_id TEXT NOT NULL,
+        assistant_message_id TEXT,
+        resolved_by_message_id TEXT,
+        question_type TEXT NOT NULL CHECK(question_type IN ('open', 'choice', 'scale')),
+        question_text TEXT NOT NULL,
+        options TEXT,
+        scale_anchors TEXT,
+        gap_being_resolved TEXT NOT NULL,
+        urgency TEXT NOT NULL CHECK(urgency IN ('low', 'medium', 'high')),
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'resolved', 'skipped')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY (source_message_id) REFERENCES messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (assistant_message_id) REFERENCES messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (resolved_by_message_id) REFERENCES messages(id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS idx_clarification_requests_session_status_created_at
+      ON clarification_requests(session_id, status, created_at DESC, id DESC);
+    `
+  },
+  {
+    name: '0008_message_agent_activities',
+    sql: `
+      CREATE TABLE IF NOT EXISTS message_agent_activities (
+        assistant_message_id TEXT NOT NULL,
+        activity_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK(kind IN ('stage', 'reasoning', 'retrieval', 'tool')),
+        status TEXT NOT NULL CHECK(status IN ('running', 'complete', 'skipped', 'error')),
+        label TEXT NOT NULL,
+        detail TEXT,
+        created_at TEXT NOT NULL,
+        item_order INTEGER NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (assistant_message_id, activity_id),
+        FOREIGN KEY (assistant_message_id) REFERENCES messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS idx_message_agent_activities_session_message_order
+      ON message_agent_activities(session_id, assistant_message_id, item_order ASC, activity_id ASC);
+    `
   }
 ]
 

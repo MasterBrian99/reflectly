@@ -2,6 +2,7 @@ import { streamText } from 'ai'
 import type { AppSettings } from '../../shared/app-settings'
 import type { ChatStreamEvent, MessageRecord } from '../../shared/session-chat'
 import type { RetrievedMemoryItem } from '../memory/retrieval'
+import type { Stage1ParseOutput } from '../stage1/types'
 import { ChatProviderRegistryBuilder } from '../ai/provider-registry'
 import { SessionChatAppError } from './error'
 
@@ -20,6 +21,7 @@ function mapMessages(
 function buildSystemPrompt(options: {
   currentSessionSummary?: string | null
   retrievedMemory?: RetrievedMemoryItem[]
+  stage1Output?: Stage1ParseOutput
 }): string {
   const sections = [systemPrompt]
   const memoryLines: string[] = []
@@ -57,7 +59,86 @@ function buildSystemPrompt(options: {
     )
   }
 
+  if (options.stage1Output) {
+    const stage1 = options.stage1Output
+    const entityLines = stage1.entities.map((entity) =>
+      [entity.name, entity.type, entity.sentiment, entity.description].filter(Boolean).join(' | ')
+    )
+    const goalLines = stage1.goalHints.map((goal) => `${goal.status}: ${goal.description}`)
+    const riskLines = stage1.riskMarkers.map(
+      (risk) => `${risk.severity} ${risk.type}: ${risk.evidence}`
+    )
+
+    sections.push(
+      [
+        'Stage 1 structured context:',
+        `- Message summary: ${stage1.summary}`,
+        `- Emotional tone: ${stage1.emotionalTone.primary}; valence ${stage1.emotionalTone.valence}; arousal ${stage1.emotionalTone.arousal}`,
+        `- Expressed intent: ${stage1.intent.expressed}`,
+        `- Inferred intent: ${stage1.intent.inferred}`,
+        `- Intent category: ${stage1.intent.category}`,
+        `- Relevant entities: ${entityLines.length ? entityLines.join('; ') : 'None extracted.'}`,
+        `- Goal hints: ${goalLines.length ? goalLines.join('; ') : 'None extracted.'}`,
+        `- Risk markers: ${riskLines.length ? riskLines.join('; ') : 'None extracted.'}`,
+        '',
+        'Use this as structured context. Do not mention internal labels to the user unless it is naturally useful.'
+      ].join('\n')
+    )
+  }
+
   return sections.join('\n\n')
+}
+
+function buildReasoningProviderOptions(
+  settings: AppSettings
+): Parameters<typeof streamText>[0]['providerOptions'] | undefined {
+  if (!settings.agentActivity.showModelReasoning) {
+    return undefined
+  }
+
+  const effort = settings.agentActivity.reasoningEffort
+
+  switch (settings.chat.providerId) {
+    case 'openai':
+      return {
+        openai: {
+          reasoningEffort: effort,
+          reasoningSummary: settings.agentActivity.reasoningSummary
+        }
+      }
+    case 'anthropic':
+      return {
+        anthropic: {
+          thinking: {
+            type: 'adaptive',
+            display: 'summarized'
+          },
+          effort: effort === 'minimal' ? 'low' : effort
+        }
+      }
+    case 'openrouter':
+      return {
+        openrouter: {
+          reasoningEffort: effort
+        }
+      }
+    case 'custom-openai-compatible':
+      return {
+        'custom-openai-compatible': {
+          reasoningEffort: effort
+        }
+      }
+  }
+}
+
+function trimReasoningDetail(detail: string): string {
+  const normalized = detail.replace(/\s+/g, ' ').trim()
+
+  if (normalized.length <= 900) {
+    return normalized
+  }
+
+  return `${normalized.slice(0, 900).trim()}...`
 }
 
 export async function streamAssistantReply(options: {
@@ -65,6 +146,7 @@ export async function streamAssistantReply(options: {
   messages: MessageRecord[]
   currentSessionSummary?: string | null
   retrievedMemory?: RetrievedMemoryItem[]
+  stage1Output?: Stage1ParseOutput
   requestId: string
   sessionId: string
   emit: (event: ChatStreamEvent) => void
@@ -75,9 +157,11 @@ export async function streamAssistantReply(options: {
     model,
     system: buildSystemPrompt({
       currentSessionSummary: options.currentSessionSummary,
-      retrievedMemory: options.retrievedMemory
+      retrievedMemory: options.retrievedMemory,
+      stage1Output: options.stage1Output
     }),
     messages: mapMessages(options.messages),
+    providerOptions: buildReasoningProviderOptions(options.settings),
     timeout: {
       totalMs: 60000,
       chunkMs: 10000
@@ -85,16 +169,132 @@ export async function streamAssistantReply(options: {
   })
 
   let assistantContent = ''
+  const reasoningById = new Map<string, string>()
+  const emitActivity = (activity: ChatStreamEvent & { type: 'activity' }): void => {
+    if (options.settings.agentActivity.showInChat) {
+      options.emit(activity)
+    }
+  }
 
   try {
-    for await (const delta of result.textStream) {
-      assistantContent += delta
-      options.emit({
-        type: 'delta',
-        requestId: options.requestId,
-        sessionId: options.sessionId,
-        delta
-      })
+    for await (const part of result.fullStream) {
+      if (part.type === 'text-delta') {
+        assistantContent += part.text
+        options.emit({
+          type: 'delta',
+          requestId: options.requestId,
+          sessionId: options.sessionId,
+          delta: part.text
+        })
+        continue
+      }
+
+      if (part.type === 'reasoning-start') {
+        reasoningById.set(part.id, '')
+        emitActivity({
+          type: 'activity',
+          requestId: options.requestId,
+          sessionId: options.sessionId,
+          activity: {
+            id: `model-reasoning-${part.id}`,
+            kind: 'reasoning',
+            status: 'running',
+            label: 'Model reasoning summary',
+            detail: 'Waiting for model-provided reasoning summary.',
+            createdAt: new Date().toISOString()
+          }
+        })
+        continue
+      }
+
+      if (part.type === 'reasoning-delta') {
+        const nextReasoning = `${reasoningById.get(part.id) ?? ''}${part.text}`
+        reasoningById.set(part.id, nextReasoning)
+        emitActivity({
+          type: 'activity',
+          requestId: options.requestId,
+          sessionId: options.sessionId,
+          activity: {
+            id: `model-reasoning-${part.id}`,
+            kind: 'reasoning',
+            status: 'running',
+            label: 'Model reasoning summary',
+            detail: trimReasoningDetail(nextReasoning),
+            createdAt: new Date().toISOString()
+          }
+        })
+        continue
+      }
+
+      if (part.type === 'reasoning-end') {
+        const reasoning = reasoningById.get(part.id)
+        emitActivity({
+          type: 'activity',
+          requestId: options.requestId,
+          sessionId: options.sessionId,
+          activity: {
+            id: `model-reasoning-${part.id}`,
+            kind: 'reasoning',
+            status: 'complete',
+            label: 'Model reasoning summary',
+            detail: reasoning?.trim()
+              ? trimReasoningDetail(reasoning)
+              : 'The provider did not return visible reasoning text for this model.',
+            createdAt: new Date().toISOString()
+          }
+        })
+        continue
+      }
+
+      if (part.type === 'tool-call') {
+        emitActivity({
+          type: 'activity',
+          requestId: options.requestId,
+          sessionId: options.sessionId,
+          activity: {
+            id: `tool-${part.toolCallId}`,
+            kind: 'tool',
+            status: 'running',
+            label: `Calling ${part.toolName}`,
+            detail: 'The model requested a tool call.',
+            createdAt: new Date().toISOString()
+          }
+        })
+        continue
+      }
+
+      if (part.type === 'tool-result') {
+        emitActivity({
+          type: 'activity',
+          requestId: options.requestId,
+          sessionId: options.sessionId,
+          activity: {
+            id: `tool-${part.toolCallId}`,
+            kind: 'tool',
+            status: 'complete',
+            label: `Completed ${part.toolName}`,
+            detail: 'The tool result was returned to the model.',
+            createdAt: new Date().toISOString()
+          }
+        })
+        continue
+      }
+
+      if (part.type === 'finish-step' && part.usage.outputTokenDetails?.reasoningTokens) {
+        emitActivity({
+          type: 'activity',
+          requestId: options.requestId,
+          sessionId: options.sessionId,
+          activity: {
+            id: `reasoning-usage-${part.response.id}`,
+            kind: 'reasoning',
+            status: 'complete',
+            label: 'Reasoning tokens used',
+            detail: `${part.usage.outputTokenDetails.reasoningTokens} reasoning token${part.usage.outputTokenDetails.reasoningTokens === 1 ? '' : 's'} reported by the provider.`,
+            createdAt: new Date().toISOString()
+          }
+        })
+      }
     }
   } catch {
     throw new SessionChatAppError(

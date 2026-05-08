@@ -22,6 +22,10 @@ export function WorkspaceSettingsRoute(): React.JSX.Element {
         onEmbeddingModelChange={appSettings.setEmbeddingModelId}
         onEmbeddingApiKeyChange={appSettings.setEmbeddingApiKey}
         onEmbeddingBaseUrlChange={appSettings.setEmbeddingBaseUrl}
+        onAgentActivityShowInChatChange={appSettings.setAgentActivityShowInChat}
+        onAgentActivityShowModelReasoningChange={appSettings.setAgentActivityShowModelReasoning}
+        onAgentActivityReasoningEffortChange={appSettings.setAgentActivityReasoningEffort}
+        onAgentActivityReasoningSummaryChange={appSettings.setAgentActivityReasoningSummary}
         onSave={appSettings.save}
       />
     </section>
