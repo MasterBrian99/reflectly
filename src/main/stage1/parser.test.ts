@@ -111,3 +111,27 @@ test('buildFallbackStage1ParseOutput marks obvious risk phrases without clarific
   assert.equal(fallback.riskMarkers[0]?.type, 'self_harm')
   assert.equal(fallback.intent.category, 'crisis_signal')
 })
+
+test('buildFallbackStage1ParseOutput detects expanded fallback risk phrases', () => {
+  const cases = [
+    ['I want to disappear.', 'suicidal_ideation'],
+    ["I can't go on.", 'suicidal_ideation'],
+    ['I cannot go on.', 'suicidal_ideation'],
+    ['I might hurt myself.', 'self_harm'],
+    ['I want to hurt myself.', 'self_harm'],
+    ['I want to hurt someone.', 'harm_to_others'],
+    ['I might hurt someone.', 'harm_to_others']
+  ] as const
+
+  for (const [content, expectedType] of cases) {
+    const fallback = buildFallbackStage1ParseOutput({
+      messageId: 'message-a',
+      sessionId: 'session-a',
+      content
+    })
+
+    assert.equal(fallback.contextGaps.length, 0, content)
+    assert.equal(fallback.riskMarkers[0]?.type, expectedType, content)
+    assert.equal(fallback.intent.category, 'crisis_signal', content)
+  }
+})

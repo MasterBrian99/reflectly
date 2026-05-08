@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import type {
   AgentActivityItem,
   MessageRecord,
+  SafetyInterruptMetadata,
   SessionDetail,
   SessionSummary
 } from '../../shared/session-chat'
@@ -34,6 +35,13 @@ interface AgentActivityRow {
   label: string
   detail: string | null
   created_at: string
+}
+
+interface SafetyEventMetadataRow {
+  assistant_message_id: string
+  risk_type: SafetyInterruptMetadata['riskType']
+  severity: SafetyInterruptMetadata['severity']
+  action_taken: SafetyInterruptMetadata['actionTaken']
 }
 
 function mapSessionSummary(row: SessionSummaryRow): SessionSummary {
@@ -201,10 +209,37 @@ export function getSessionDetail(workspacePath: string, sessionId: string): Sess
       ]
     }
 
+    const safetyRows = database
+      .prepare(
+        `
+          SELECT
+            assistant_message_id,
+            risk_type,
+            severity,
+            action_taken
+          FROM safety_events
+          WHERE session_id = ?
+            AND assistant_message_id IS NOT NULL
+            AND action_taken = 'crisis_interrupt'
+          ORDER BY created_at DESC, id DESC
+        `
+      )
+      .all(sessionId) as unknown as SafetyEventMetadataRow[]
+    const safetyByMessageId: Record<string, SafetyInterruptMetadata> = {}
+
+    for (const row of safetyRows) {
+      safetyByMessageId[row.assistant_message_id] = {
+        riskType: row.risk_type,
+        severity: row.severity,
+        actionTaken: row.action_taken
+      }
+    }
+
     return {
       session,
       messages: messages.map(mapMessageRecord),
-      agentActivitiesByMessageId
+      agentActivitiesByMessageId,
+      ...(Object.keys(safetyByMessageId).length ? { safetyByMessageId } : {})
     }
   } finally {
     database.close()

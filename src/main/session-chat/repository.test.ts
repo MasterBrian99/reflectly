@@ -56,6 +56,21 @@ async function createWorkspaceFixture(): Promise<{
       FOREIGN KEY (assistant_message_id) REFERENCES messages(id) ON DELETE CASCADE,
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
     ) STRICT;
+
+    CREATE TABLE safety_events (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      source_message_id TEXT NOT NULL,
+      assistant_message_id TEXT,
+      risk_type TEXT NOT NULL CHECK(risk_type IN ('self_harm', 'suicidal_ideation', 'harm_to_others', 'abuse', 'acute_distress', 'other')),
+      severity TEXT NOT NULL CHECK(severity IN ('low', 'medium', 'high', 'critical')),
+      evidence TEXT NOT NULL,
+      action_taken TEXT NOT NULL CHECK(action_taken IN ('proceed', 'supportive_notice', 'crisis_interrupt')),
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY (source_message_id) REFERENCES messages(id) ON DELETE CASCADE,
+      FOREIGN KEY (assistant_message_id) REFERENCES messages(id) ON DELETE CASCADE
+    ) STRICT;
   `)
 
   database.close()
@@ -114,4 +129,66 @@ test('session repository persists agent activities with assistant messages', asy
   assert.equal(activities[0].detail, 'Enough context is available to continue.')
   assert.equal(activities[1].id, 'assistant-generation')
   assert.equal(activities[1].detail, undefined)
+})
+
+test('session repository loads safety metadata by assistant message id', async (t) => {
+  const fixture = await createWorkspaceFixture()
+  t.after(async () => fixture.cleanup())
+
+  const createdSession = createSession(fixture.workspacePath)
+  const userState = persistUserMessageAndLoadContext(
+    fixture.workspacePath,
+    createdSession.session.id,
+    'I feel like hurting myself.'
+  )
+
+  assert.ok(userState)
+
+  const assistantState = persistAssistantMessage(
+    fixture.workspacePath,
+    createdSession.session.id,
+    'Safety response.'
+  )
+
+  assert.ok(assistantState)
+
+  const database = openWorkspaceDatabase(fixture.workspacePath)
+
+  database
+    .prepare(
+      `
+        INSERT INTO safety_events (
+          id,
+          session_id,
+          source_message_id,
+          assistant_message_id,
+          risk_type,
+          severity,
+          evidence,
+          action_taken,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+    )
+    .run(
+      'safety-event-a',
+      createdSession.session.id,
+      userState.userMessage.id,
+      assistantState.assistantMessage.id,
+      'self_harm',
+      'medium',
+      'I feel like hurting myself.',
+      'crisis_interrupt',
+      '2026-05-08T12:00:00.000Z'
+    )
+  database.close()
+
+  const loadedSession = getSessionDetail(fixture.workspacePath, createdSession.session.id)
+  const safetyMetadata = loadedSession?.safetyByMessageId?.[assistantState.assistantMessage.id]
+
+  assert.deepEqual(safetyMetadata, {
+    riskType: 'self_harm',
+    severity: 'medium',
+    actionTaken: 'crisis_interrupt'
+  })
 })

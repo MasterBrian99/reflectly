@@ -7,12 +7,14 @@ import {
   LoaderCircle,
   Mic,
   SendHorizontal,
+  ShieldAlert,
   Sparkles
 } from 'lucide-react'
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type {
   AgentActivityItem,
   ClarificationPayload,
+  SafetyInterruptMetadata,
   SessionChatError,
   SessionDetail
 } from '@shared/session-chat'
@@ -57,6 +59,7 @@ function TranscriptBlock({
   content,
   isStreaming = false,
   clarification,
+  safety,
   isAnsweringClarification = false,
   onClarificationAnswer
 }: {
@@ -64,10 +67,12 @@ function TranscriptBlock({
   content: string
   isStreaming?: boolean
   clarification?: ClarificationPayload
+  safety?: SafetyInterruptMetadata
   isAnsweringClarification?: boolean
   onClarificationAnswer?: (content: string) => Promise<void>
 }): React.JSX.Element {
   const isUser = role === 'user'
+  const isSafetyInterrupt = Boolean(safety)
 
   async function handleScaleAnswer(value: number): Promise<void> {
     await onClarificationAnswer?.(`${value} out of 10`)
@@ -75,8 +80,18 @@ function TranscriptBlock({
 
   return (
     <article
-      className={cn('workspace-transcript-block', isUser && 'workspace-transcript-block-user')}
+      className={cn(
+        'workspace-transcript-block',
+        isUser && 'workspace-transcript-block-user',
+        isSafetyInterrupt && 'workspace-transcript-block-safety'
+      )}
     >
+      {isSafetyInterrupt ? (
+        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-destructive/20 bg-[#fff5f3] px-3 py-1 text-xs font-medium uppercase tracking-[0.14em] text-destructive">
+          <ShieldAlert className="size-3.5" />
+          Safety
+        </div>
+      ) : null}
       <p
         className={cn(
           'workspace-transcript-copy whitespace-pre-wrap',
@@ -295,6 +310,7 @@ export function ChatPanel({
                     role={message.role}
                     content={message.content}
                     clarification={clarificationControlsByMessageId[message.id]}
+                    safety={detail.safetyByMessageId?.[message.id]}
                     isAnsweringClarification={isSendingMessage}
                     onClarificationAnswer={async (content) => {
                       await onSendMessage(content)

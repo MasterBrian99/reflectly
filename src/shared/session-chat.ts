@@ -20,6 +20,7 @@ export interface SessionDetail {
   session: SessionSummary
   messages: MessageRecord[]
   agentActivitiesByMessageId: Record<string, AgentActivityItem[]>
+  safetyByMessageId?: Record<string, SafetyInterruptMetadata>
 }
 
 export type CreateSessionSuccess = SessionDetail
@@ -40,6 +41,21 @@ export interface ClarificationPayload {
   questionText: string
   options?: string[]
   scaleAnchors?: [string, string]
+}
+
+export type SafetyRiskType =
+  | 'self_harm'
+  | 'suicidal_ideation'
+  | 'harm_to_others'
+  | 'abuse'
+  | 'acute_distress'
+  | 'other'
+export type SafetyRiskSeverity = 'low' | 'medium' | 'high' | 'critical'
+
+export interface SafetyInterruptMetadata {
+  riskType: SafetyRiskType
+  severity: SafetyRiskSeverity
+  actionTaken: 'crisis_interrupt'
 }
 
 export type AgentActivityKind = 'stage' | 'reasoning' | 'retrieval' | 'tool'
@@ -112,6 +128,14 @@ export type ChatStreamEvent =
       session: SessionSummary
       assistantMessage: MessageRecord
       clarification: ClarificationPayload
+    }
+  | {
+      type: 'safety_interrupt'
+      requestId: string
+      sessionId: string
+      session: SessionSummary
+      assistantMessage: MessageRecord
+      safety: SafetyInterruptMetadata
     }
   | {
       type: 'error'

@@ -4,6 +4,7 @@ import type {
   ChatStreamEvent,
   ClarificationPayload,
   MessageRecord,
+  SafetyInterruptMetadata,
   SessionChatError,
   SessionDetail,
   SessionSummary
@@ -53,12 +54,51 @@ function appendUniqueMessage(
 function buildDetail(
   session: SessionSummary,
   nextMessages: MessageRecord[],
-  agentActivitiesByMessageId: AgentActivitiesByMessageId
+  agentActivitiesByMessageId: AgentActivitiesByMessageId,
+  safetyByMessageId?: Record<string, SafetyInterruptMetadata>
 ): SessionDetail {
   return {
     session,
     messages: nextMessages,
-    agentActivitiesByMessageId
+    agentActivitiesByMessageId,
+    ...(safetyByMessageId ? { safetyByMessageId } : {})
+  }
+}
+
+function mergeRequestActivity(
+  currentActivities: AgentActivitiesByRequestId,
+  requestId: string,
+  nextActivity: AgentActivityItem
+): AgentActivitiesByRequestId {
+  const requestActivities = currentActivities[requestId] ?? []
+  const existingIndex = requestActivities.findIndex((activity) => activity.id === nextActivity.id)
+  const nextActivities =
+    existingIndex >= 0
+      ? requestActivities.map((activity, index) =>
+          index === existingIndex ? nextActivity : activity
+        )
+      : [...requestActivities, nextActivity]
+
+  return {
+    ...currentActivities,
+    [requestId]: nextActivities
+  }
+}
+
+function takeRequestActivities(
+  currentActivities: AgentActivitiesByRequestId,
+  requestId: string
+): {
+  completedActivities: AgentActivityItem[]
+  nextActivitiesByRequestId: AgentActivitiesByRequestId
+} {
+  const completedActivities = currentActivities[requestId] ?? []
+  const nextActivitiesByRequestId = { ...currentActivities }
+  delete nextActivitiesByRequestId[requestId]
+
+  return {
+    completedActivities,
+    nextActivitiesByRequestId
   }
 }
 
@@ -168,6 +208,29 @@ export function useSessionShell(): {
 
   useEffect(() => {
     const unsubscribe = sessionIpcService.onChatStreamEvent((event) => {
+      const activityState =
+        event.type === 'activity'
+          ? mergeRequestActivity(
+              agentActivitiesByRequestIdRef.current,
+              event.requestId,
+              event.activity
+            )
+          : null
+      const completedActivityState =
+        event.type === 'complete' ||
+        event.type === 'clarification' ||
+        event.type === 'safety_interrupt'
+          ? takeRequestActivities(agentActivitiesByRequestIdRef.current, event.requestId)
+          : null
+
+      if (activityState) {
+        agentActivitiesByRequestIdRef.current = activityState
+      }
+
+      if (completedActivityState) {
+        agentActivitiesByRequestIdRef.current = completedActivityState.nextActivitiesByRequestId
+      }
+
       startTransition(() => {
         setStreamingAssistant((currentStream) => {
           if (!isMatchingStream(currentStream, event)) {
@@ -189,36 +252,16 @@ export function useSessionShell(): {
         })
 
         if (event.type === 'activity') {
-          setAgentActivitiesByRequestId((currentActivities) => {
-            const requestActivities = currentActivities[event.requestId] ?? []
-            const existingIndex = requestActivities.findIndex(
-              (activity) => activity.id === event.activity.id
-            )
-            const nextActivities =
-              existingIndex >= 0
-                ? requestActivities.map((activity, index) =>
-                    index === existingIndex ? event.activity : activity
-                  )
-                : [...requestActivities, event.activity]
-
-            const nextActivitiesByRequestId = {
-              ...currentActivities,
-              [event.requestId]: nextActivities
-            }
-            agentActivitiesByRequestIdRef.current = nextActivitiesByRequestId
-            return nextActivitiesByRequestId
-          })
+          setAgentActivitiesByRequestId(activityState ?? agentActivitiesByRequestIdRef.current)
           return
         }
 
         if (event.type === 'complete') {
-          const completedActivities = agentActivitiesByRequestIdRef.current[event.requestId] ?? []
-          setAgentActivitiesByRequestId((currentActivities) => {
-            const nextActivitiesByRequestId = { ...currentActivities }
-            delete nextActivitiesByRequestId[event.requestId]
-            agentActivitiesByRequestIdRef.current = nextActivitiesByRequestId
-            return nextActivitiesByRequestId
-          })
+          const completedActivities = completedActivityState?.completedActivities ?? []
+          setAgentActivitiesByRequestId(
+            completedActivityState?.nextActivitiesByRequestId ??
+              agentActivitiesByRequestIdRef.current
+          )
           setAgentActivitiesByMessageId((currentActivities) => ({
             ...currentActivities,
             [event.assistantMessage.id]: completedActivities
@@ -231,23 +274,26 @@ export function useSessionShell(): {
 
             const nextMessages = appendUniqueMessage(currentDetail.messages, event.assistantMessage)
 
-            return buildDetail(event.session, nextMessages, {
-              ...currentDetail.agentActivitiesByMessageId,
-              [event.assistantMessage.id]: completedActivities
-            })
+            return buildDetail(
+              event.session,
+              nextMessages,
+              {
+                ...currentDetail.agentActivitiesByMessageId,
+                [event.assistantMessage.id]: completedActivities
+              },
+              currentDetail.safetyByMessageId
+            )
           })
           setIsSendingMessage(false)
           return
         }
 
         if (event.type === 'clarification') {
-          const completedActivities = agentActivitiesByRequestIdRef.current[event.requestId] ?? []
-          setAgentActivitiesByRequestId((currentActivities) => {
-            const nextActivitiesByRequestId = { ...currentActivities }
-            delete nextActivitiesByRequestId[event.requestId]
-            agentActivitiesByRequestIdRef.current = nextActivitiesByRequestId
-            return nextActivitiesByRequestId
-          })
+          const completedActivities = completedActivityState?.completedActivities ?? []
+          setAgentActivitiesByRequestId(
+            completedActivityState?.nextActivitiesByRequestId ??
+              agentActivitiesByRequestIdRef.current
+          )
           setAgentActivitiesByMessageId((currentActivities) => ({
             ...currentActivities,
             [event.assistantMessage.id]: completedActivities
@@ -264,10 +310,51 @@ export function useSessionShell(): {
 
             const nextMessages = appendUniqueMessage(currentDetail.messages, event.assistantMessage)
 
-            return buildDetail(event.session, nextMessages, {
-              ...currentDetail.agentActivitiesByMessageId,
-              [event.assistantMessage.id]: completedActivities
-            })
+            return buildDetail(
+              event.session,
+              nextMessages,
+              {
+                ...currentDetail.agentActivitiesByMessageId,
+                [event.assistantMessage.id]: completedActivities
+              },
+              currentDetail.safetyByMessageId
+            )
+          })
+          setIsSendingMessage(false)
+          return
+        }
+
+        if (event.type === 'safety_interrupt') {
+          const completedActivities = completedActivityState?.completedActivities ?? []
+          setAgentActivitiesByRequestId(
+            completedActivityState?.nextActivitiesByRequestId ??
+              agentActivitiesByRequestIdRef.current
+          )
+          setAgentActivitiesByMessageId((currentActivities) => ({
+            ...currentActivities,
+            [event.assistantMessage.id]: completedActivities
+          }))
+          setSessions((currentSessions) => mergeSession(currentSessions, event.session))
+          setActiveDetail((currentDetail) => {
+            if (currentDetail?.session.id !== event.sessionId) {
+              return currentDetail
+            }
+
+            const nextMessages = appendUniqueMessage(currentDetail.messages, event.assistantMessage)
+            const safetyByMessageId = {
+              ...(currentDetail.safetyByMessageId ?? {}),
+              [event.assistantMessage.id]: event.safety
+            }
+
+            return buildDetail(
+              event.session,
+              nextMessages,
+              {
+                ...currentDetail.agentActivitiesByMessageId,
+                [event.assistantMessage.id]: completedActivities
+              },
+              safetyByMessageId
+            )
           })
           setIsSendingMessage(false)
           return
@@ -355,7 +442,8 @@ export function useSessionShell(): {
             return buildDetail(
               result.error.session!,
               nextMessages,
-              currentDetail?.agentActivitiesByMessageId ?? agentActivitiesByMessageId
+              currentDetail?.agentActivitiesByMessageId ?? agentActivitiesByMessageId,
+              currentDetail?.safetyByMessageId
             )
           })
         }
@@ -364,6 +452,12 @@ export function useSessionShell(): {
       return result.error
     }
 
+    const initialActivitiesByRequestId = {
+      ...agentActivitiesByRequestIdRef.current,
+      [result.data.requestId]: agentActivitiesByRequestIdRef.current[result.data.requestId] ?? []
+    }
+    agentActivitiesByRequestIdRef.current = initialActivitiesByRequestId
+
     startTransition(() => {
       setSessions((currentSessions) => mergeSession(currentSessions, result.data.session))
       setStreamingAssistant({
@@ -371,14 +465,7 @@ export function useSessionShell(): {
         sessionId: result.data.session.id,
         content: ''
       })
-      setAgentActivitiesByRequestId((currentActivities) => {
-        const nextActivitiesByRequestId = {
-          ...currentActivities,
-          [result.data.requestId]: currentActivities[result.data.requestId] ?? []
-        }
-        agentActivitiesByRequestIdRef.current = nextActivitiesByRequestId
-        return nextActivitiesByRequestId
-      })
+      setAgentActivitiesByRequestId(initialActivitiesByRequestId)
       setClarificationControlsByMessageId({})
       setActiveDetail((currentDetail) => {
         const nextMessages = appendUniqueMessage(
@@ -388,7 +475,8 @@ export function useSessionShell(): {
         return buildDetail(
           result.data.session,
           nextMessages,
-          currentDetail?.agentActivitiesByMessageId ?? agentActivitiesByMessageId
+          currentDetail?.agentActivitiesByMessageId ?? agentActivitiesByMessageId,
+          currentDetail?.safetyByMessageId
         )
       })
     })

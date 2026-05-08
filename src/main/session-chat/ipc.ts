@@ -12,6 +12,9 @@ import type {
 import { getSessionSummary } from '../memory/repository'
 import { MemoryRetrievalService } from '../memory/retrieval'
 import { writeSessionMemory } from '../memory/write-back'
+import { evaluateSafetyGate } from '../safety/gate'
+import { crisisInterruptMessage } from '../safety/messages'
+import { insertSafetyEvent } from '../safety/repository'
 import { readAppSettings } from '../settings/store'
 import { applyClarificationRules } from '../stage1/clarification'
 import { runStage1Parser } from '../stage1/parser'
@@ -238,6 +241,81 @@ export function registerSessionChatIpc(): void {
                 detail: stage1Output.shouldClarify
                   ? 'A clarification would materially change the next response.'
                   : 'Enough context is available to continue.'
+              })
+
+              emitActivity({
+                id: 'safety-gate',
+                kind: 'stage',
+                status: 'running',
+                label: 'Checking safety markers',
+                detail: 'Reviewing deterministic risk markers before continuing.'
+              })
+              const safetyDecision = evaluateSafetyGate(stage1Output.riskMarkers)
+
+              if (safetyDecision.action === 'crisis_interrupt' && safetyDecision.marker) {
+                const assistantState = persistAssistantMessage(
+                  workspacePath,
+                  request.sessionId,
+                  crisisInterruptMessage
+                )
+
+                if (!assistantState) {
+                  throw new SessionChatAppError(
+                    'MESSAGE_PERSIST_FAILED',
+                    'Reflectly saved your message, but could not save the safety response.',
+                    true
+                  )
+                }
+
+                try {
+                  insertSafetyEvent(workspacePath, {
+                    sessionId: request.sessionId,
+                    sourceMessageId: persistedUserState.userMessage.id,
+                    assistantMessageId: assistantState.assistantMessage.id,
+                    riskType: safetyDecision.marker.type,
+                    severity: safetyDecision.marker.severity,
+                    evidence: safetyDecision.marker.evidence,
+                    actionTaken: 'crisis_interrupt'
+                  })
+                } catch (error) {
+                  console.error(
+                    'Safety event persistence failed after assistant persistence.',
+                    error
+                  )
+                }
+
+                emitActivity({
+                  id: 'safety-gate',
+                  kind: 'stage',
+                  status: 'complete',
+                  label: 'Safety interrupt triggered',
+                  detail: 'A fixed safety response was saved without model generation.'
+                })
+                persistBufferedActivities(assistantState.assistantMessage.id)
+                emit({
+                  type: 'safety_interrupt',
+                  requestId,
+                  sessionId: request.sessionId,
+                  session: assistantState.session,
+                  assistantMessage: assistantState.assistantMessage,
+                  safety: {
+                    riskType: safetyDecision.marker.type,
+                    severity: safetyDecision.marker.severity,
+                    actionTaken: 'crisis_interrupt'
+                  }
+                })
+                return
+              }
+
+              emitActivity({
+                id: 'safety-gate',
+                kind: 'stage',
+                status: 'complete',
+                label: 'Safety gate cleared',
+                detail:
+                  safetyDecision.action === 'supportive_notice'
+                    ? 'A medium-severity marker was noted for later prompt shaping.'
+                    : 'No interrupt-level marker was found.'
               })
 
               if (stage1Output.shouldClarify && stage1Output.clarification) {

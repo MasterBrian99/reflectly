@@ -309,6 +309,11 @@
     border-color: rgb(167 231 220 / 95%);
   }
 
+  .workspace-transcript-block-safety {
+    @apply border-l-2 pl-10;
+    border-color: rgb(201 107 99 / 45%);
+  }
+
   .workspace-transcript-copy {
     font-family: var(--font-reading);
     font-size: 1.18rem;

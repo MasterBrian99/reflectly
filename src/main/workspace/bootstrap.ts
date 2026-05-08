@@ -181,6 +181,28 @@ const migrations: MigrationDefinition[] = [
       CREATE INDEX IF NOT EXISTS idx_message_agent_activities_session_message_order
       ON message_agent_activities(session_id, assistant_message_id, item_order ASC, activity_id ASC);
     `
+  },
+  {
+    name: '0009_safety_events',
+    sql: `
+      CREATE TABLE IF NOT EXISTS safety_events (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        source_message_id TEXT NOT NULL,
+        assistant_message_id TEXT,
+        risk_type TEXT NOT NULL CHECK(risk_type IN ('self_harm', 'suicidal_ideation', 'harm_to_others', 'abuse', 'acute_distress', 'other')),
+        severity TEXT NOT NULL CHECK(severity IN ('low', 'medium', 'high', 'critical')),
+        evidence TEXT NOT NULL,
+        action_taken TEXT NOT NULL CHECK(action_taken IN ('proceed', 'supportive_notice', 'crisis_interrupt')),
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY (source_message_id) REFERENCES messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (assistant_message_id) REFERENCES messages(id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS idx_safety_events_session_created_at
+      ON safety_events(session_id, created_at DESC, id DESC);
+    `
   }
 ]
 

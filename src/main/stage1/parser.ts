@@ -175,17 +175,29 @@ export function buildFallbackStage1ParseOutput(options: {
 }): Stage1ParseOutput {
   const normalizedContent = options.content.replace(/\s+/g, ' ').trim()
   const lowerContent = normalizedContent.toLowerCase()
-  const hasRiskSignal = includesAny(lowerContent, [
-    'hurt myself',
-    'hurting myself',
-    'harm myself',
+  const hasSuicidalSignal = includesAny(lowerContent, [
     'kill myself',
     'suicide',
     'suicidal',
     'end it all',
-    'hurt someone',
-    'harm someone'
+    'i want to disappear',
+    "i can't go on",
+    'i cannot go on'
   ])
+  const hasSelfHarmSignal = includesAny(lowerContent, [
+    'hurt myself',
+    'hurting myself',
+    'harm myself',
+    'i might hurt myself',
+    'i want to hurt myself'
+  ])
+  const hasHarmToOthersSignal = includesAny(lowerContent, [
+    'hurt someone',
+    'harm someone',
+    'i want to hurt someone',
+    'i might hurt someone'
+  ])
+  const hasRiskSignal = hasSuicidalSignal || hasSelfHarmSignal || hasHarmToOthersSignal
   const feelsStuck = includesAny(lowerContent, [
     'feel stuck',
     'feeling stuck',
@@ -264,16 +276,12 @@ export function buildFallbackStage1ParseOutput(options: {
     riskMarkers: hasRiskSignal
       ? [
           {
-            type:
-              lowerContent.includes('suicide') || lowerContent.includes('kill myself')
-                ? 'suicidal_ideation'
-                : lowerContent.includes('hurt someone') || lowerContent.includes('harm someone')
-                  ? 'harm_to_others'
-                  : 'self_harm',
-            severity:
-              lowerContent.includes('kill myself') || lowerContent.includes('suicide')
-                ? 'high'
-                : 'medium',
+            type: hasSuicidalSignal
+              ? 'suicidal_ideation'
+              : hasHarmToOthersSignal
+                ? 'harm_to_others'
+                : 'self_harm',
+            severity: hasSuicidalSignal ? 'high' : 'medium',
             evidence: normalizedContent.slice(0, 240),
             confidence: 0.7
           }
