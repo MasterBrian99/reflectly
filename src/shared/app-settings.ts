@@ -1,12 +1,13 @@
 export type ChatProviderId = 'openai' | 'anthropic' | 'openrouter' | 'custom-openai-compatible'
+export type EmbeddingProviderId = 'openai' | 'openrouter' | 'custom-openai-compatible'
 
-export interface ChatModelPreset {
+export interface ModelPreset {
   id: string
   label: string
 }
 
-export interface ChatProviderOption {
-  id: ChatProviderId
+export interface ProviderOption<PROVIDER_ID extends string> {
+  id: PROVIDER_ID
   label: string
   description: string
   apiKeyLabel: string
@@ -14,19 +15,31 @@ export interface ChatProviderOption {
   supportsCustomBaseUrl: boolean
   defaultBaseUrl?: string
   defaultModelId: string
-  modelPresets: ChatModelPreset[]
+  modelPresets: ModelPreset[]
 }
 
-export interface AppSettings {
-  activeProviderId: ChatProviderId
+export type ChatProviderOption = ProviderOption<ChatProviderId>
+export type EmbeddingProviderOption = ProviderOption<EmbeddingProviderId>
+
+export interface ProviderSettings<PROVIDER_ID extends string> {
+  providerId: PROVIDER_ID
   modelId: string
-  customBaseUrl: string
-  providerApiKeys: Partial<Record<ChatProviderId, string>>
+  apiKey: string
+  baseUrl?: string
+}
+
+export type ChatSettings = ProviderSettings<ChatProviderId>
+export type EmbeddingSettings = ProviderSettings<EmbeddingProviderId>
+
+export interface AppSettings {
+  chat: ChatSettings
+  embeddings: EmbeddingSettings
 }
 
 export interface AppSettingsSnapshot {
   settings: AppSettings
-  providers: ChatProviderOption[]
+  chatProviders: ChatProviderOption[]
+  embeddingProviders: EmbeddingProviderOption[]
 }
 
 export interface UpdateAppSettingsRequest {

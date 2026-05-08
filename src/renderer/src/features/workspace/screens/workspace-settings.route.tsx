@@ -8,15 +8,20 @@ export function WorkspaceSettingsRoute(): React.JSX.Element {
   return (
     <section className="min-h-0 flex-1 overflow-hidden px-12 pt-8 pb-8">
       <SettingsScreen
-        providers={appSettings.snapshot?.providers ?? []}
+        chatProviders={appSettings.snapshot?.chatProviders ?? []}
+        embeddingProviders={appSettings.snapshot?.embeddingProviders ?? []}
         draft={appSettings.draft}
         isLoading={appSettings.isLoading}
         isSaving={appSettings.isSaving}
         error={appSettings.error}
-        onProviderChange={appSettings.setActiveProviderId}
-        onModelChange={appSettings.setModelId}
-        onApiKeyChange={appSettings.setApiKey}
-        onCustomBaseUrlChange={appSettings.setCustomBaseUrl}
+        onChatProviderChange={appSettings.setChatProviderId}
+        onChatModelChange={appSettings.setChatModelId}
+        onChatApiKeyChange={appSettings.setChatApiKey}
+        onChatBaseUrlChange={appSettings.setChatBaseUrl}
+        onEmbeddingProviderChange={appSettings.setEmbeddingProviderId}
+        onEmbeddingModelChange={appSettings.setEmbeddingModelId}
+        onEmbeddingApiKeyChange={appSettings.setEmbeddingApiKey}
+        onEmbeddingBaseUrlChange={appSettings.setEmbeddingBaseUrl}
         onSave={appSettings.save}
       />
     </section>

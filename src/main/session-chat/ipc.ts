@@ -8,6 +8,9 @@ import type {
   SendMessageSuccess,
   SessionChatResult
 } from '../../shared/session-chat'
+import { getSessionSummary } from '../memory/repository'
+import { MemoryRetrievalService } from '../memory/retrieval'
+import { writeSessionMemory } from '../memory/write-back'
 import { readAppSettings } from '../settings/store'
 import { openWorkspace } from '../workspace/bootstrap'
 import { readWorkspacePath } from '../workspace/store'
@@ -20,6 +23,8 @@ import {
   persistAssistantMessage,
   persistUserMessageAndLoadContext
 } from './repository'
+
+const memoryRetrievalService = new MemoryRetrievalService()
 
 async function resolveActiveWorkspacePath(): Promise<string> {
   const workspacePath = await readWorkspacePath()
@@ -151,9 +156,18 @@ export function registerSessionChatIpc(): void {
             }
 
             try {
+              const currentSessionSummary = getSessionSummary(workspacePath, request.sessionId)
+              const retrievedMemory = await memoryRetrievalService.retrieve({
+                workspacePath,
+                settings,
+                activeSessionId: request.sessionId,
+                queryText: persistedUserState.userMessage.content
+              })
               const assistantContent = await streamAssistantReply({
                 settings,
                 messages: persistedUserState.contextMessages,
+                currentSessionSummary: currentSessionSummary?.summaryText ?? null,
+                retrievedMemory,
                 requestId,
                 sessionId: request.sessionId,
                 emit
@@ -170,6 +184,19 @@ export function registerSessionChatIpc(): void {
                   'Reflectly saved your message, but could not save the reply.',
                   true
                 )
+              }
+
+              try {
+                await writeSessionMemory({
+                  workspacePath,
+                  settings,
+                  session: assistantState.session,
+                  userMessage: persistedUserState.userMessage,
+                  assistantMessage: assistantState.assistantMessage,
+                  previousSessionSummary: currentSessionSummary
+                })
+              } catch (error) {
+                console.error('Memory write-back failed after assistant persistence.', error)
               }
 
               emit({

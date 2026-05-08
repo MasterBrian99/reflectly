@@ -62,6 +62,48 @@ const migrations: MigrationDefinition[] = [
       CREATE INDEX IF NOT EXISTS idx_messages_session_created_at
       ON messages(session_id, created_at ASC, id ASC);
     `
+  },
+  {
+    name: '0004_memory_chunks',
+    sql: `
+      CREATE TABLE IF NOT EXISTS memory_chunks (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        source_message_id TEXT NOT NULL,
+        chunk_kind TEXT NOT NULL,
+        content TEXT NOT NULL,
+        embedding_provider TEXT,
+        embedding_model TEXT,
+        embedding_vector TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY (source_message_id) REFERENCES messages(id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS idx_memory_chunks_session_updated_at
+      ON memory_chunks(session_id, updated_at DESC, created_at DESC, id DESC);
+    `
+  },
+  {
+    name: '0005_session_summaries',
+    sql: `
+      CREATE TABLE IF NOT EXISTS session_summaries (
+        session_id TEXT PRIMARY KEY,
+        summary_text TEXT NOT NULL,
+        source_message_id TEXT NOT NULL,
+        embedding_provider TEXT,
+        embedding_model TEXT,
+        embedding_vector TEXT,
+        turn_count_snapshot INTEGER,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY (source_message_id) REFERENCES messages(id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS idx_session_summaries_updated_at
+      ON session_summaries(updated_at DESC, session_id DESC);
+    `
   }
 ]
 

@@ -1,4 +1,9 @@
-import type { AppSettings, ChatProviderOption } from '@shared/app-settings'
+import type {
+  AppSettings,
+  ChatProviderOption,
+  EmbeddingProviderOption,
+  ProviderOption
+} from '@shared/app-settings'
 import {
   BadgeCheck,
   Bot,
@@ -27,19 +32,24 @@ import {
 import { Separator } from '@/components/ui/separator'
 
 type SettingsScreenProps = {
-  providers: ChatProviderOption[]
+  chatProviders: ChatProviderOption[]
+  embeddingProviders: EmbeddingProviderOption[]
   draft: AppSettings | null
   isLoading: boolean
   isSaving: boolean
   error: string | null
-  onProviderChange: (providerId: ChatProviderOption['id']) => void
-  onModelChange: (modelId: string) => void
-  onApiKeyChange: (value: string) => void
-  onCustomBaseUrlChange: (value: string) => void
+  onChatProviderChange: (providerId: ChatProviderOption['id']) => void
+  onChatModelChange: (modelId: string) => void
+  onChatApiKeyChange: (value: string) => void
+  onChatBaseUrlChange: (value: string) => void
+  onEmbeddingProviderChange: (providerId: EmbeddingProviderOption['id']) => void
+  onEmbeddingModelChange: (modelId: string) => void
+  onEmbeddingApiKeyChange: (value: string) => void
+  onEmbeddingBaseUrlChange: (value: string) => void
   onSave: () => Promise<void>
 }
 
-type SetupCardProps = {
+type SetupCardProps<PROVIDER_ID extends string> = {
   title: string
   description: string
   providerLabel: string
@@ -48,12 +58,11 @@ type SetupCardProps = {
   apiKeyLabel: string
   apiKeyPlaceholder: string
   isSaving: boolean
-  currentProvider: ChatProviderOption | null
-  providers: ChatProviderOption[]
-  onProviderChange: (providerId: ChatProviderOption['id']) => void
+  currentProvider: ProviderOption<PROVIDER_ID> | null
+  providers: Array<ProviderOption<PROVIDER_ID>>
+  onProviderChange: (providerId: PROVIDER_ID) => void
   onModelChange: (modelId: string) => void
   onApiKeyChange?: (value: string) => void
-  modelPresets?: Array<{ id: string; label: string }>
   saveLabel: string
   onSave?: () => Promise<void>
   showLiveSave?: boolean
@@ -104,7 +113,7 @@ function SetupSummary({
   )
 }
 
-function SetupCard({
+function SetupCard<PROVIDER_ID extends string>({
   title,
   description,
   providerLabel,
@@ -118,13 +127,12 @@ function SetupCard({
   onProviderChange,
   onModelChange,
   onApiKeyChange,
-  modelPresets,
   saveLabel,
   onSave,
   showLiveSave = false,
   customBaseUrl,
   onCustomBaseUrlChange
-}: SetupCardProps): React.JSX.Element {
+}: SetupCardProps<PROVIDER_ID>): React.JSX.Element {
   return (
     <Card className="rounded-[2rem] border-border/70 bg-[#fffdf9] shadow-[0_12px_32px_rgba(55,78,75,0.06)]">
       <CardContent className="p-6 md:p-8">
@@ -144,7 +152,7 @@ function SetupCard({
                 </Label>
                 <Select
                   value={currentProvider?.id ?? providers[0]?.id}
-                  onValueChange={(value) => onProviderChange(value as ChatProviderOption['id'])}
+                  onValueChange={(value) => onProviderChange(value as PROVIDER_ID)}
                   disabled={!showLiveSave}
                 >
                   <SelectTrigger id={`${title}-provider`} className="settings-input">
@@ -164,28 +172,14 @@ function SetupCard({
                 <Label className="settings-field-label" htmlFor={`${title}-model`}>
                   Model id
                 </Label>
-                {showLiveSave && modelPresets?.length ? (
-                  <Select value={modelValue} onValueChange={onModelChange}>
-                    <SelectTrigger id={`${title}-model`} className="settings-input">
-                      <SelectValue placeholder="Choose model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {modelPresets.map((model) => (
-                        <SelectItem key={model.id} value={model.id}>
-                          {model.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Input
-                    id={`${title}-model`}
-                    value={modelValue}
-                    onChange={(event) => onModelChange(event.target.value)}
-                    className="settings-input"
-                    disabled={!showLiveSave}
-                  />
-                )}
+                <Input
+                  id={`${title}-model`}
+                  value={modelValue}
+                  onChange={(event) => onModelChange(event.target.value)}
+                  className="settings-input"
+                  disabled={!showLiveSave}
+                  placeholder={currentProvider?.defaultModelId}
+                />
               </div>
             </div>
 
@@ -241,33 +235,27 @@ function SetupCard({
 }
 
 export function SettingsScreen({
-  providers,
+  chatProviders,
+  embeddingProviders,
   draft,
   isLoading,
   isSaving,
   error,
-  onProviderChange,
-  onModelChange,
-  onApiKeyChange,
-  onCustomBaseUrlChange,
+  onChatProviderChange,
+  onChatModelChange,
+  onChatApiKeyChange,
+  onChatBaseUrlChange,
+  onEmbeddingProviderChange,
+  onEmbeddingModelChange,
+  onEmbeddingApiKeyChange,
+  onEmbeddingBaseUrlChange,
   onSave
 }: SettingsScreenProps): React.JSX.Element {
   const [displayName, setDisplayName] = useState('Julian Thorne')
-  const embeddingProviderOption: ChatProviderOption = {
-    id: 'openai',
-    label: 'OpenAI',
-    description: '',
-    apiKeyLabel: 'API Key',
-    apiKeyPlaceholder: 'Enter API key...',
-    supportsCustomBaseUrl: false,
-    defaultModelId: 'text-embedding-3-small',
-    modelPresets: [{ id: 'text-embedding-3-small', label: 'text-embedding-3-small' }]
-  }
-  const activeProvider =
-    providers.find((provider) => provider.id === draft?.activeProviderId) ?? null
-  const currentApiKey = draft ? (draft.providerApiKeys[draft.activeProviderId] ?? '') : ''
-  const embeddingProviderLabel = 'OpenAI'
-  const embeddingModelId = 'text-embedding-3-small'
+  const activeChatProvider =
+    chatProviders.find((provider) => provider.id === draft?.chat.providerId) ?? null
+  const activeEmbeddingProvider =
+    embeddingProviders.find((provider) => provider.id === draft?.embeddings.providerId) ?? null
 
   return (
     <div className="h-full min-h-0 overflow-hidden">
@@ -292,7 +280,7 @@ export function SettingsScreen({
             </div>
           ) : null}
 
-          {isLoading || !draft || !activeProvider ? (
+          {isLoading || !draft || !activeChatProvider || !activeEmbeddingProvider ? (
             <div className="flex min-h-48 items-center justify-center rounded-[2rem] border border-border/70 bg-[#fffdf9] text-muted-foreground">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
               Loading settings
@@ -332,26 +320,25 @@ export function SettingsScreen({
                 <SetupCard
                   title="Provider and model setup"
                   description="Choose the active provider, set the model id, and store the current provider key in app settings."
-                  providerLabel={activeProvider.label}
-                  modelValue={draft.modelId}
-                  apiKeyValue={currentApiKey}
-                  apiKeyLabel={activeProvider.apiKeyLabel}
-                  apiKeyPlaceholder={activeProvider.apiKeyPlaceholder}
+                  providerLabel={activeChatProvider.label}
+                  modelValue={draft.chat.modelId}
+                  apiKeyValue={draft.chat.apiKey}
+                  apiKeyLabel={activeChatProvider.apiKeyLabel}
+                  apiKeyPlaceholder={activeChatProvider.apiKeyPlaceholder}
                   isSaving={isSaving}
-                  currentProvider={activeProvider}
-                  providers={providers}
-                  onProviderChange={onProviderChange}
-                  onModelChange={onModelChange}
-                  onApiKeyChange={onApiKeyChange}
-                  modelPresets={activeProvider.modelPresets}
+                  currentProvider={activeChatProvider}
+                  providers={chatProviders}
+                  onProviderChange={onChatProviderChange}
+                  onModelChange={onChatModelChange}
+                  onApiKeyChange={onChatApiKeyChange}
                   saveLabel="Save Configuration"
                   onSave={onSave}
                   showLiveSave
                   customBaseUrl={
-                    activeProvider.supportsCustomBaseUrl ? draft.customBaseUrl : undefined
+                    activeChatProvider.supportsCustomBaseUrl ? draft.chat.baseUrl : undefined
                   }
                   onCustomBaseUrlChange={
-                    activeProvider.supportsCustomBaseUrl ? onCustomBaseUrlChange : undefined
+                    activeChatProvider.supportsCustomBaseUrl ? onChatBaseUrlChange : undefined
                   }
                 />
               </section>
@@ -364,18 +351,31 @@ export function SettingsScreen({
 
                 <SetupCard
                   title="Vector Embedding Model Setup"
-                  description="Configure the model used for semantic search and local memory organization."
-                  providerLabel={embeddingProviderLabel}
-                  modelValue={embeddingModelId}
-                  apiKeyValue=""
-                  apiKeyLabel="API Key"
-                  apiKeyPlaceholder="Enter API key..."
-                  isSaving={false}
-                  currentProvider={embeddingProviderOption}
-                  providers={[embeddingProviderOption]}
-                  onProviderChange={() => undefined}
-                  onModelChange={() => undefined}
+                  description="Configure the separate embedding provider used for retrieval and memory write-back."
+                  providerLabel={activeEmbeddingProvider.label}
+                  modelValue={draft.embeddings.modelId}
+                  apiKeyValue={draft.embeddings.apiKey}
+                  apiKeyLabel={activeEmbeddingProvider.apiKeyLabel}
+                  apiKeyPlaceholder={activeEmbeddingProvider.apiKeyPlaceholder}
+                  isSaving={isSaving}
+                  currentProvider={activeEmbeddingProvider}
+                  providers={embeddingProviders}
+                  onProviderChange={onEmbeddingProviderChange}
+                  onModelChange={onEmbeddingModelChange}
+                  onApiKeyChange={onEmbeddingApiKeyChange}
                   saveLabel="Save Configuration"
+                  onSave={onSave}
+                  showLiveSave
+                  customBaseUrl={
+                    activeEmbeddingProvider.supportsCustomBaseUrl
+                      ? draft.embeddings.baseUrl
+                      : undefined
+                  }
+                  onCustomBaseUrlChange={
+                    activeEmbeddingProvider.supportsCustomBaseUrl
+                      ? onEmbeddingBaseUrlChange
+                      : undefined
+                  }
                 />
               </section>
 

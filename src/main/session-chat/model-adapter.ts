@@ -1,6 +1,7 @@
 import { streamText } from 'ai'
 import type { AppSettings } from '../../shared/app-settings'
 import type { ChatStreamEvent, MessageRecord } from '../../shared/session-chat'
+import type { RetrievedMemoryItem } from '../memory/retrieval'
 import { ChatProviderRegistryBuilder } from '../ai/provider-registry'
 import { SessionChatAppError } from './error'
 
@@ -16,9 +17,54 @@ function mapMessages(
   }))
 }
 
+function buildSystemPrompt(options: {
+  currentSessionSummary?: string | null
+  retrievedMemory?: RetrievedMemoryItem[]
+}): string {
+  const sections = [systemPrompt]
+  const memoryLines: string[] = []
+
+  if (options.currentSessionSummary?.trim()) {
+    memoryLines.push('Current session summary:')
+    memoryLines.push(options.currentSessionSummary.trim())
+  }
+
+  if (options.retrievedMemory?.length) {
+    if (memoryLines.length) {
+      memoryLines.push('')
+    }
+
+    memoryLines.push('Retrieved memory:')
+
+    for (const memory of options.retrievedMemory) {
+      memoryLines.push(
+        `[${memory.scopeLabel}] ${memory.sessionTitle} | ${memory.chunkKind} | similarity ${memory.similarity.toFixed(3)}`
+      )
+      memoryLines.push(memory.content)
+      memoryLines.push('')
+    }
+  }
+
+  if (memoryLines.length) {
+    sections.push(
+      [
+        'Memory context:',
+        "Use this only when it is relevant to the user's current message.",
+        'Treat it as background context, not as a replacement for the current transcript.',
+        '',
+        ...memoryLines
+      ].join('\n')
+    )
+  }
+
+  return sections.join('\n\n')
+}
+
 export async function streamAssistantReply(options: {
   settings: AppSettings
   messages: MessageRecord[]
+  currentSessionSummary?: string | null
+  retrievedMemory?: RetrievedMemoryItem[]
   requestId: string
   sessionId: string
   emit: (event: ChatStreamEvent) => void
@@ -27,7 +73,10 @@ export async function streamAssistantReply(options: {
 
   const result = streamText({
     model,
-    system: systemPrompt,
+    system: buildSystemPrompt({
+      currentSessionSummary: options.currentSessionSummary,
+      retrievedMemory: options.retrievedMemory
+    }),
     messages: mapMessages(options.messages),
     timeout: {
       totalMs: 60000,

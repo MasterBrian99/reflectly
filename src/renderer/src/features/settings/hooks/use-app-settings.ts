@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react'
-import type { AppSettings, AppSettingsSnapshot, ChatProviderOption } from '@shared/app-settings'
+import type {
+  AppSettings,
+  AppSettingsSnapshot,
+  ChatProviderOption,
+  EmbeddingProviderOption
+} from '@shared/app-settings'
 import { settingsIpcService } from '../services/settings-ipc.service'
 
 export function useAppSettings(): {
@@ -8,10 +13,14 @@ export function useAppSettings(): {
   isLoading: boolean
   isSaving: boolean
   error: string | null
-  setActiveProviderId: (providerId: ChatProviderOption['id']) => void
-  setModelId: (modelId: string) => void
-  setApiKey: (value: string) => void
-  setCustomBaseUrl: (value: string) => void
+  setChatProviderId: (providerId: ChatProviderOption['id']) => void
+  setChatModelId: (modelId: string) => void
+  setChatApiKey: (value: string) => void
+  setChatBaseUrl: (value: string) => void
+  setEmbeddingProviderId: (providerId: EmbeddingProviderOption['id']) => void
+  setEmbeddingModelId: (modelId: string) => void
+  setEmbeddingApiKey: (value: string) => void
+  setEmbeddingBaseUrl: (value: string) => void
   save: () => Promise<void>
 } {
   const [snapshot, setSnapshot] = useState<AppSettingsSnapshot | null>(null)
@@ -39,53 +48,123 @@ export function useAppSettings(): {
     })
   }, [])
 
-  function setActiveProviderId(providerId: ChatProviderOption['id']): void {
+  function setChatProviderId(providerId: ChatProviderOption['id']): void {
     if (!draft || !snapshot) {
       return
     }
 
-    const provider = snapshot.providers.find((item) => item.id === providerId)
+    const provider = snapshot.chatProviders.find((item) => item.id === providerId)
 
     setDraft({
       ...draft,
-      activeProviderId: providerId,
-      modelId: provider?.defaultModelId ?? draft.modelId
-    })
-  }
-
-  function setModelId(modelId: string): void {
-    if (!draft) {
-      return
-    }
-
-    setDraft({
-      ...draft,
-      modelId
-    })
-  }
-
-  function setApiKey(value: string): void {
-    if (!draft) {
-      return
-    }
-
-    setDraft({
-      ...draft,
-      providerApiKeys: {
-        ...draft.providerApiKeys,
-        [draft.activeProviderId]: value
+      chat: {
+        ...draft.chat,
+        providerId,
+        modelId: provider?.defaultModelId ?? draft.chat.modelId,
+        baseUrl: provider?.supportsCustomBaseUrl ? provider.defaultBaseUrl : undefined
       }
     })
   }
 
-  function setCustomBaseUrl(value: string): void {
+  function setChatModelId(modelId: string): void {
     if (!draft) {
       return
     }
 
     setDraft({
       ...draft,
-      customBaseUrl: value
+      chat: {
+        ...draft.chat,
+        modelId
+      }
+    })
+  }
+
+  function setChatApiKey(value: string): void {
+    if (!draft) {
+      return
+    }
+
+    setDraft({
+      ...draft,
+      chat: {
+        ...draft.chat,
+        apiKey: value
+      }
+    })
+  }
+
+  function setChatBaseUrl(value: string): void {
+    if (!draft) {
+      return
+    }
+
+    setDraft({
+      ...draft,
+      chat: {
+        ...draft.chat,
+        baseUrl: value
+      }
+    })
+  }
+
+  function setEmbeddingProviderId(providerId: EmbeddingProviderOption['id']): void {
+    if (!draft || !snapshot) {
+      return
+    }
+
+    const provider = snapshot.embeddingProviders.find((item) => item.id === providerId)
+
+    setDraft({
+      ...draft,
+      embeddings: {
+        ...draft.embeddings,
+        providerId,
+        modelId: provider?.defaultModelId ?? draft.embeddings.modelId,
+        baseUrl: provider?.supportsCustomBaseUrl ? provider.defaultBaseUrl : undefined
+      }
+    })
+  }
+
+  function setEmbeddingModelId(modelId: string): void {
+    if (!draft) {
+      return
+    }
+
+    setDraft({
+      ...draft,
+      embeddings: {
+        ...draft.embeddings,
+        modelId
+      }
+    })
+  }
+
+  function setEmbeddingApiKey(value: string): void {
+    if (!draft) {
+      return
+    }
+
+    setDraft({
+      ...draft,
+      embeddings: {
+        ...draft.embeddings,
+        apiKey: value
+      }
+    })
+  }
+
+  function setEmbeddingBaseUrl(value: string): void {
+    if (!draft) {
+      return
+    }
+
+    setDraft({
+      ...draft,
+      embeddings: {
+        ...draft.embeddings,
+        baseUrl: value
+      }
     })
   }
 
@@ -114,10 +193,14 @@ export function useAppSettings(): {
     isLoading,
     isSaving,
     error,
-    setActiveProviderId,
-    setModelId,
-    setApiKey,
-    setCustomBaseUrl,
+    setChatProviderId,
+    setChatModelId,
+    setChatApiKey,
+    setChatBaseUrl,
+    setEmbeddingProviderId,
+    setEmbeddingModelId,
+    setEmbeddingApiKey,
+    setEmbeddingBaseUrl,
     save
   }
 }

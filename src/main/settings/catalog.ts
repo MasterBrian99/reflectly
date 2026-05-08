@@ -1,4 +1,10 @@
-import type { AppSettings, ChatProviderOption } from '../../shared/app-settings'
+import type {
+  AppSettings,
+  ChatProviderId,
+  ChatProviderOption,
+  EmbeddingProviderId,
+  EmbeddingProviderOption
+} from '../../shared/app-settings'
 
 export const chatProviderOptions: ChatProviderOption[] = [
   {
@@ -58,15 +64,71 @@ export const chatProviderOptions: ChatProviderOption[] = [
   }
 ]
 
+export const embeddingProviderOptions: EmbeddingProviderOption[] = [
+  {
+    id: 'openai',
+    label: 'OpenAI',
+    description: 'OpenAI embedding models for semantic retrieval.',
+    apiKeyLabel: 'OpenAI embedding API key',
+    apiKeyPlaceholder: 'sk-...',
+    supportsCustomBaseUrl: false,
+    defaultModelId: 'text-embedding-3-small',
+    modelPresets: [
+      { id: 'text-embedding-3-small', label: 'text-embedding-3-small' },
+      { id: 'text-embedding-3-large', label: 'text-embedding-3-large' }
+    ]
+  },
+  {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    description: 'OpenRouter embeddings through an OpenAI-compatible endpoint.',
+    apiKeyLabel: 'OpenRouter embedding API key',
+    apiKeyPlaceholder: 'sk-or-v1-...',
+    supportsCustomBaseUrl: false,
+    defaultBaseUrl: 'https://openrouter.ai/api/v1',
+    defaultModelId: 'openai/text-embedding-3-small',
+    modelPresets: [
+      { id: 'openai/text-embedding-3-small', label: 'OpenAI text-embedding-3-small' },
+      { id: 'openai/text-embedding-3-large', label: 'OpenAI text-embedding-3-large' }
+    ]
+  },
+  {
+    id: 'custom-openai-compatible',
+    label: 'Custom OpenAI-Compatible',
+    description: 'Any provider that exposes an OpenAI-compatible embeddings endpoint.',
+    apiKeyLabel: 'Embedding API key',
+    apiKeyPlaceholder: 'API key',
+    supportsCustomBaseUrl: true,
+    defaultBaseUrl: 'http://localhost:1234/v1',
+    defaultModelId: 'text-embedding-3-small',
+    modelPresets: [{ id: 'text-embedding-3-small', label: 'Custom embedding model id' }]
+  }
+]
+
 export const defaultAppSettings: AppSettings = {
-  activeProviderId: 'openrouter',
-  modelId: 'openai/gpt-4.1-mini',
-  customBaseUrl: 'http://localhost:1234/v1',
-  providerApiKeys: {}
+  chat: {
+    providerId: 'openrouter',
+    modelId: 'openai/gpt-4.1-mini',
+    apiKey: ''
+  },
+  embeddings: {
+    providerId: 'openai',
+    modelId: 'text-embedding-3-small',
+    apiKey: ''
+  }
 }
 
-export function getProviderOption(providerId: AppSettings['activeProviderId']): ChatProviderOption {
+export function getChatProviderOption(providerId: ChatProviderId): ChatProviderOption {
   return (
     chatProviderOptions.find((provider) => provider.id === providerId) ?? chatProviderOptions[0]
+  )
+}
+
+export function getEmbeddingProviderOption(
+  providerId: EmbeddingProviderId
+): EmbeddingProviderOption {
+  return (
+    embeddingProviderOptions.find((provider) => provider.id === providerId) ??
+    embeddingProviderOptions[0]
   )
 }

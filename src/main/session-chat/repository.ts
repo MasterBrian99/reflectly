@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
 import type { MessageRecord, SessionDetail, SessionSummary } from '../../shared/session-chat'
-import { getWorkspacePaths } from '../workspace/paths'
+import { openWorkspaceDatabase } from '../workspace/database'
 
 const defaultSessionTitle = 'New session'
 
@@ -19,12 +19,6 @@ interface MessageRow {
   role: MessageRecord['role']
   content: string
   created_at: string
-}
-
-function openWorkspaceDatabase(workspacePath: string): DatabaseSync {
-  const database = new DatabaseSync(getWorkspacePaths(workspacePath).databasePath)
-  database.exec('PRAGMA foreign_keys = ON;')
-  return database
 }
 
 function mapSessionSummary(row: SessionSummaryRow): SessionSummary {

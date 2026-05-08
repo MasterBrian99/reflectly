@@ -2,31 +2,16 @@ import { app } from 'electron'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AppSettings } from '../../shared/app-settings'
-import { defaultAppSettings, getProviderOption } from './catalog'
+import { normalizeAppSettings, type LegacyAppSettings } from './normalize'
 
 interface SettingsStoreState {
-  appSettings?: Partial<AppSettings>
+  appSettings?: Partial<AppSettings> | LegacyAppSettings
 }
 
 const storeFile = 'app-settings.json'
 
 function getStorePath(): string {
   return join(app.getPath('userData'), storeFile)
-}
-
-function normalizeAppSettings(settings?: Partial<AppSettings>): AppSettings {
-  const activeProviderId = settings?.activeProviderId ?? defaultAppSettings.activeProviderId
-  const activeProvider = getProviderOption(activeProviderId)
-
-  return {
-    activeProviderId,
-    modelId: settings?.modelId?.trim() || activeProvider.defaultModelId,
-    customBaseUrl: settings?.customBaseUrl?.trim() || defaultAppSettings.customBaseUrl,
-    providerApiKeys: {
-      ...defaultAppSettings.providerApiKeys,
-      ...settings?.providerApiKeys
-    }
-  }
 }
 
 export async function readAppSettings(): Promise<AppSettings> {
