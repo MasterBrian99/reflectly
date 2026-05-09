@@ -1,13 +1,14 @@
 # Reflectly
 
-> **Warning — Research Project Only**
->
+> [!CAUTION]
+> **Research Project Only**
 > This application is a **research tool for clinical psychology validation**. It is **not** intended for general use.
 >
 > - If you are experiencing a mental health crisis or need support, please contact a qualified professional or reach your local crisis line immediately.
 > - Do not use this application as a substitute for therapy, counseling, or medical advice.
 > - This application can be habit-forming and is not designed for casual or daily use by the general population.
->
+
+> [!WARNING]  
 > **This project is partially AI-generated.**
 
 ---
@@ -99,4 +100,4 @@ You are welcome to clone and modify this repository under the terms of the [MIT 
 
 - **[architecture.md](./architecture.md)** — Technical architecture of the system. Covers the multi-stage reasoning pipeline (Stage 1–6 with safety gate), session lifecycle, memory system layers, data flow, research infrastructure, tech stack, and key design decisions. Start here if you want to understand how the system is built.
 
-- **[research-flow.md](./eesearch-flow.md)** — Research methodology and data flow. Describes how every session and exchange produces structured research data, how each pipeline stage works from a research perspective, and what analysis paths are enabled by the data architecture. Start here if you want to understand what the system does with the data it collects.
+- **[research-flow.md](./research-flow.md)** — Research methodology and data flow. Describes how every session and exchange produces structured research data, how each pipeline stage works from a research perspective, and what analysis paths are enabled by the data architecture. Start here if you want to understand what the system does with the data it collects.

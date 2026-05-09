@@ -10,7 +10,7 @@ The core research question this platform was built to address is: **can a struct
 
 ## Research Context
 
-The researcher is a student in clinical psychology who needed a tool to validate and reason through their own clinical research. The platform is not a product — it is a structured environment for studying how AI can support reflective dialogue in a research setting.
+The researcher(me) is a research student in research psychology who needed a tool to validate and reason through their own clinical research. The platform is not a product, it is a structured environment for studying how AI can support reflective dialogue in a research setting.
 
 The platform is explicitly **not** intended for general use or as a replacement for professional mental health support. The warning in the README and at launch makes this clear.
 
@@ -199,6 +199,7 @@ All prior outputs feed into the final response. The synthesis rules are:
 The response is streamed token-by-token to the renderer. The user sees it in real-time.
 
 For the anxiety example, a Stage 5 response might be:
+
 > "Anxiety that doesn't have a clear name or shape can be particularly frustrating. You've noticed it's there, and you're looking for some understanding of where it's coming from — that's a meaningful first step in itself. What comes to mind when you sit with that 'I don't know why' feeling for a moment?"
 
 **Research output:** The assistant message and the agent activity trace for this turn. The researcher can analyze: response patterns by support mode, length and complexity by depth level, how often resources are included vs. not.
@@ -259,6 +260,7 @@ With this data architecture, several research questions become tractable:
 ## Example Research Flow
 
 **User first message (Session 1, Turn 1):**
+
 > "I've been feeling really anxious lately and I don't know why."
 
 **Pipeline behavior:**
@@ -278,6 +280,7 @@ With this data architecture, several research questions become tractable:
 - First session summary created with initial anxiety theme
 
 **User second message (Session 1, Turn 2):**
+
 > "I think it might have something to do with work."
 
 **Pipeline behavior:**
@@ -297,6 +300,7 @@ With this data architecture, several research questions become tractable:
 - Memory retrieval found Turn 1 chunk — longitudinal context building
 
 **User third message (Session 1, Turn 3):**
+
 > "I can't sleep because of it."
 
 **Pipeline behavior:**
