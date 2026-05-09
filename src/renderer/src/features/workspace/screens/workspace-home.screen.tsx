@@ -38,7 +38,11 @@ export function WorkspaceHomeScreen({ status }: WorkspaceHomeScreenProps): React
         workspaceName={status.workspaceName ?? 'Local Workspace'}
         sessions={sessionShell.sessions}
         selectedSessionId={sessionShell.selectedSessionId}
-        isBusy={sessionShell.isCreatingSession || sessionShell.isLoading}
+        isBusy={
+          sessionShell.isCreatingSession ||
+          sessionShell.isLoading ||
+          sessionShell.isUpdatingSessionLifecycle
+        }
         onCreateSession={sessionShell.createSession}
         onSelectSession={sessionShell.selectSession}
       />

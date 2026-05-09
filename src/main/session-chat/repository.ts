@@ -2,9 +2,12 @@ import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import type {
   AgentActivityItem,
+  SessionClosingMood,
+  SessionClosingResponses,
   MessageRecord,
   SafetyInterruptMetadata,
   SessionDetail,
+  SessionPhase,
   SessionSummary
 } from '../../shared/session-chat'
 import { openWorkspaceDatabase } from '../workspace/database'
@@ -17,6 +20,12 @@ interface SessionSummaryRow {
   created_at: string
   updated_at: string
   message_count: number
+  phase: SessionPhase
+  intention: string | null
+  closing_standout: string | null
+  closing_carry_forward: string | null
+  closing_mood: SessionClosingMood | null
+  completed_at: string | null
 }
 
 interface MessageRow {
@@ -50,7 +59,13 @@ function mapSessionSummary(row: SessionSummaryRow): SessionSummary {
     title: row.title,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    messageCount: Number(row.message_count)
+    messageCount: Number(row.message_count),
+    phase: row.phase,
+    ...(row.intention ? { intention: row.intention } : {}),
+    ...(row.closing_standout ? { closingStandout: row.closing_standout } : {}),
+    ...(row.closing_carry_forward ? { closingCarryForward: row.closing_carry_forward } : {}),
+    ...(row.closing_mood ? { closingMood: Number(row.closing_mood) as SessionClosingMood } : {}),
+    ...(row.completed_at ? { completedAt: row.completed_at } : {})
   }
 }
 
@@ -84,11 +99,27 @@ function getSessionSummaryById(database: DatabaseSync, sessionId: string): Sessi
           s.title,
           s.created_at,
           s.updated_at,
+          s.phase,
+          s.intention,
+          s.closing_standout,
+          s.closing_carry_forward,
+          s.closing_mood,
+          s.completed_at,
           COUNT(m.id) AS message_count
         FROM sessions s
         LEFT JOIN messages m ON m.session_id = s.id
         WHERE s.id = ?
-        GROUP BY s.id, s.title, s.created_at, s.updated_at
+        GROUP BY
+          s.id,
+          s.title,
+          s.created_at,
+          s.updated_at,
+          s.phase,
+          s.intention,
+          s.closing_standout,
+          s.closing_carry_forward,
+          s.closing_mood,
+          s.completed_at
       `
     )
     .get(sessionId) as SessionSummaryRow | undefined
@@ -113,10 +144,26 @@ export function listSessions(workspacePath: string): SessionSummary[] {
             s.title,
             s.created_at,
             s.updated_at,
+            s.phase,
+            s.intention,
+            s.closing_standout,
+            s.closing_carry_forward,
+            s.closing_mood,
+            s.completed_at,
             COUNT(m.id) AS message_count
           FROM sessions s
           LEFT JOIN messages m ON m.session_id = s.id
-          GROUP BY s.id, s.title, s.created_at, s.updated_at
+          GROUP BY
+            s.id,
+            s.title,
+            s.created_at,
+            s.updated_at,
+            s.phase,
+            s.intention,
+            s.closing_standout,
+            s.closing_carry_forward,
+            s.closing_mood,
+            s.completed_at
           ORDER BY s.updated_at DESC, s.created_at DESC, s.id DESC
         `
       )
@@ -138,8 +185,8 @@ export function createSession(workspacePath: string): SessionDetail {
     database
       .prepare(
         `
-          INSERT INTO sessions (id, title, status, created_at, updated_at)
-          VALUES (?, ?, 'active', ?, ?)
+          INSERT INTO sessions (id, title, status, phase, created_at, updated_at)
+          VALUES (?, ?, 'active', 'opening', ?, ?)
         `
       )
       .run(sessionId, defaultSessionTitle, now, now)
@@ -152,7 +199,8 @@ export function createSession(workspacePath: string): SessionDetail {
         title: defaultSessionTitle,
         createdAt: now,
         updatedAt: now,
-        messageCount: 0
+        messageCount: 0,
+        phase: 'opening'
       },
       messages: [],
       agentActivitiesByMessageId: {}
@@ -241,6 +289,153 @@ export function getSessionDetail(workspacePath: string, sessionId: string): Sess
       agentActivitiesByMessageId,
       ...(Object.keys(safetyByMessageId).length ? { safetyByMessageId } : {})
     }
+  } finally {
+    database.close()
+  }
+}
+
+function normalizeOptionalText(value: string | undefined): string | null {
+  const normalized = value?.replace(/\s+/g, ' ').trim()
+  return normalized || null
+}
+
+function normalizeClosingMood(value: SessionClosingResponses['mood']): SessionClosingMood | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 5
+    ? value
+    : null
+}
+
+export function setSessionIntention(
+  workspacePath: string,
+  sessionId: string,
+  intention: string
+): SessionDetail | null {
+  const database = openWorkspaceDatabase(workspacePath)
+
+  try {
+    const existingSession = getSessionSummaryById(database, sessionId)
+
+    if (!existingSession) {
+      return null
+    }
+
+    const now = new Date().toISOString()
+    const normalizedIntention = normalizeOptionalText(intention)
+
+    database
+      .prepare(
+        `
+          UPDATE sessions
+          SET intention = ?, phase = 'working', updated_at = ?
+          WHERE id = ?
+        `
+      )
+      .run(normalizedIntention, now, sessionId)
+  } finally {
+    database.close()
+  }
+
+  return getSessionDetail(workspacePath, sessionId)
+}
+
+export function beginSessionClosing(
+  workspacePath: string,
+  sessionId: string
+): SessionDetail | null {
+  const database = openWorkspaceDatabase(workspacePath)
+
+  try {
+    const existingSession = getSessionSummaryById(database, sessionId)
+
+    if (!existingSession) {
+      return null
+    }
+
+    if (existingSession.phase === 'completed') {
+      return getSessionDetail(workspacePath, sessionId)
+    }
+
+    database
+      .prepare(
+        `
+          UPDATE sessions
+          SET phase = 'closing', updated_at = ?
+          WHERE id = ?
+        `
+      )
+      .run(new Date().toISOString(), sessionId)
+  } finally {
+    database.close()
+  }
+
+  return getSessionDetail(workspacePath, sessionId)
+}
+
+export function closeSession(
+  workspacePath: string,
+  sessionId: string,
+  closing: SessionClosingResponses
+): SessionDetail | null {
+  const database = openWorkspaceDatabase(workspacePath)
+
+  try {
+    const existingSession = getSessionSummaryById(database, sessionId)
+
+    if (!existingSession) {
+      return null
+    }
+
+    const now = new Date().toISOString()
+
+    database
+      .prepare(
+        `
+          UPDATE sessions
+          SET
+            phase = 'completed',
+            closing_standout = ?,
+            closing_carry_forward = ?,
+            closing_mood = ?,
+            completed_at = ?,
+            updated_at = ?
+          WHERE id = ?
+        `
+      )
+      .run(
+        normalizeOptionalText(closing.standout),
+        normalizeOptionalText(closing.carryForward),
+        normalizeClosingMood(closing.mood),
+        now,
+        now,
+        sessionId
+      )
+  } finally {
+    database.close()
+  }
+
+  return getSessionDetail(workspacePath, sessionId)
+}
+
+export function getLatestMessageForSession(
+  workspacePath: string,
+  sessionId: string
+): MessageRecord | null {
+  const database = openWorkspaceDatabase(workspacePath)
+
+  try {
+    const row = database
+      .prepare(
+        `
+          SELECT id, session_id, role, content, created_at
+          FROM messages
+          WHERE session_id = ?
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1
+        `
+      )
+      .get(sessionId) as MessageRow | undefined
+
+    return row ? mapMessageRecord(row) : null
   } finally {
     database.close()
   }

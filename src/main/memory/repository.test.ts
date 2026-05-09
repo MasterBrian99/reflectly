@@ -196,6 +196,21 @@ test('memory repository handles null embedding vectors gracefully', async (t) =>
   assert.equal(currentSummary.embeddingVector, null)
 })
 
+test('memory repository persists carry-forward chunks', async (t) => {
+  const fixture = await createWorkspaceFixture()
+  t.after(async () => fixture.cleanup())
+
+  const insertedChunk = insertMemoryChunk(fixture.workspacePath, {
+    sessionId: 'session-a',
+    sourceMessageId: 'message-a',
+    chunkKind: 'carry_forward',
+    content: 'Pause before reacting next time.'
+  })
+
+  assert.equal(insertedChunk.chunkKind, 'carry_forward')
+  assert.equal(insertedChunk.content, 'Pause before reacting next time.')
+})
+
 test('session summary round-trips BLOB embedding vectors correctly', async (t) => {
   const fixture = await createWorkspaceFixture()
   t.after(async () => fixture.cleanup())

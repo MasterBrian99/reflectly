@@ -1,10 +1,11 @@
-import { startTransition, useEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AgentActivityItem,
   ChatStreamEvent,
   ClarificationPayload,
   MessageRecord,
   SafetyInterruptMetadata,
+  SessionClosingResponses,
   SessionChatError,
   SessionDetail,
   SessionSummary
@@ -117,6 +118,7 @@ export function useSessionShell(): {
   isCreatingSession: boolean
   isLoadingSession: boolean
   isSendingMessage: boolean
+  isUpdatingSessionLifecycle: boolean
   selectionError: string | null
   sendError: SessionChatError | null
   streamingAssistant: StreamingAssistantState | null
@@ -125,6 +127,11 @@ export function useSessionShell(): {
   agentActivitiesByMessageId: AgentActivitiesByMessageId
   createSession: () => Promise<void>
   selectSession: (sessionId: string) => Promise<void>
+  setIntention: (intention: string) => Promise<void>
+  skipIntention: () => Promise<void>
+  beginClosing: () => Promise<void>
+  closeSession: (closing: SessionClosingResponses) => Promise<void>
+  skipClosing: () => Promise<void>
   sendMessage: (content: string) => Promise<SessionChatError | null>
 } {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
@@ -134,6 +141,7 @@ export function useSessionShell(): {
   const [isCreatingSession, setIsCreatingSession] = useState(false)
   const [isLoadingSession, setIsLoadingSession] = useState(false)
   const [isSendingMessage, setIsSendingMessage] = useState(false)
+  const [isUpdatingSessionLifecycle, setIsUpdatingSessionLifecycle] = useState(false)
   const [selectionError, setSelectionError] = useState<string | null>(null)
   const [sendError, setSendError] = useState<SessionChatError | null>(null)
   const [streamingAssistant, setStreamingAssistant] = useState<StreamingAssistantState | null>(null)
@@ -150,26 +158,33 @@ export function useSessionShell(): {
     [selectedSessionId, sessions]
   )
 
-  async function loadSession(sessionId: string): Promise<void> {
-    setIsLoadingSession(true)
-    setSelectionError(null)
-
-    const result = await sessionIpcService.getSession({ sessionId })
-
-    if (!result.ok) {
-      setSelectionError(result.error.message)
-      setIsLoadingSession(false)
-      return
-    }
-
+  const applySessionDetail = useCallback((detail: SessionDetail): void => {
     startTransition(() => {
-      setActiveDetail(result.data)
-      setAgentActivitiesByMessageId(result.data.agentActivitiesByMessageId)
-      setSessions((currentSessions) => mergeSession(currentSessions, result.data.session))
-      setSelectedSessionId(result.data.session.id)
+      setActiveDetail(detail)
+      setAgentActivitiesByMessageId(detail.agentActivitiesByMessageId)
+      setSessions((currentSessions) => mergeSession(currentSessions, detail.session))
+      setSelectedSessionId(detail.session.id)
     })
-    setIsLoadingSession(false)
-  }
+  }, [])
+
+  const loadSession = useCallback(
+    async (sessionId: string): Promise<void> => {
+      setIsLoadingSession(true)
+      setSelectionError(null)
+
+      const result = await sessionIpcService.getSession({ sessionId })
+
+      if (!result.ok) {
+        setSelectionError(result.error.message)
+        setIsLoadingSession(false)
+        return
+      }
+
+      applySessionDetail(result.data)
+      setIsLoadingSession(false)
+    },
+    [applySessionDetail]
+  )
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -204,7 +219,7 @@ export function useSessionShell(): {
         }
       })()
     })
-  }, [])
+  }, [loadSession])
 
   useEffect(() => {
     const unsubscribe = sessionIpcService.onChatStreamEvent((event) => {
@@ -406,6 +421,88 @@ export function useSessionShell(): {
     await loadSession(sessionId)
   }
 
+  async function setIntention(intention: string): Promise<void> {
+    const activeSessionId = activeDetail?.session.id ?? selectedSummary?.id
+
+    if (!activeSessionId || isUpdatingSessionLifecycle) {
+      return
+    }
+
+    setIsUpdatingSessionLifecycle(true)
+    setSelectionError(null)
+
+    const result = await sessionIpcService.setSessionIntention({
+      sessionId: activeSessionId,
+      intention
+    })
+
+    if (!result.ok) {
+      setSelectionError(result.error.message)
+      setIsUpdatingSessionLifecycle(false)
+      return
+    }
+
+    applySessionDetail(result.data)
+    setIsUpdatingSessionLifecycle(false)
+  }
+
+  async function skipIntention(): Promise<void> {
+    await setIntention('')
+  }
+
+  async function beginClosing(): Promise<void> {
+    const activeSessionId = activeDetail?.session.id ?? selectedSummary?.id
+
+    if (!activeSessionId || isUpdatingSessionLifecycle || isSendingMessage) {
+      return
+    }
+
+    setIsUpdatingSessionLifecycle(true)
+    setSelectionError(null)
+
+    const result = await sessionIpcService.beginSessionClosing({
+      sessionId: activeSessionId
+    })
+
+    if (!result.ok) {
+      setSelectionError(result.error.message)
+      setIsUpdatingSessionLifecycle(false)
+      return
+    }
+
+    applySessionDetail(result.data)
+    setIsUpdatingSessionLifecycle(false)
+  }
+
+  async function closeSession(closing: SessionClosingResponses): Promise<void> {
+    const activeSessionId = activeDetail?.session.id ?? selectedSummary?.id
+
+    if (!activeSessionId || isUpdatingSessionLifecycle || isSendingMessage) {
+      return
+    }
+
+    setIsUpdatingSessionLifecycle(true)
+    setSelectionError(null)
+
+    const result = await sessionIpcService.closeSession({
+      sessionId: activeSessionId,
+      closing
+    })
+
+    if (!result.ok) {
+      setSelectionError(result.error.message)
+      setIsUpdatingSessionLifecycle(false)
+      return
+    }
+
+    applySessionDetail(result.data)
+    setIsUpdatingSessionLifecycle(false)
+  }
+
+  async function skipClosing(): Promise<void> {
+    await closeSession({})
+  }
+
   async function sendMessage(content: string): Promise<SessionChatError | null> {
     const activeSessionId = activeDetail?.session.id ?? selectedSummary?.id
 
@@ -492,6 +589,7 @@ export function useSessionShell(): {
     isCreatingSession,
     isLoadingSession,
     isSendingMessage,
+    isUpdatingSessionLifecycle,
     selectionError,
     sendError,
     streamingAssistant,
@@ -500,6 +598,11 @@ export function useSessionShell(): {
     agentActivitiesByMessageId,
     createSession,
     selectSession,
+    setIntention,
+    skipIntention,
+    beginClosing,
+    closeSession,
+    skipClosing,
     sendMessage
   }
 }

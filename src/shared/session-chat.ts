@@ -1,4 +1,6 @@
 export type MessageRole = 'user' | 'assistant'
+export type SessionPhase = 'opening' | 'working' | 'closing' | 'completed'
+export type SessionClosingMood = 1 | 2 | 3 | 4 | 5
 
 export interface SessionSummary {
   id: string
@@ -6,6 +8,12 @@ export interface SessionSummary {
   createdAt: string
   updatedAt: string
   messageCount: number
+  phase: SessionPhase
+  intention?: string
+  closingStandout?: string
+  closingCarryForward?: string
+  closingMood?: SessionClosingMood
+  completedAt?: string
 }
 
 export interface MessageRecord {
@@ -34,6 +42,26 @@ export interface SendMessageSuccess {
   requestId: string
   session: SessionSummary
   userMessage: MessageRecord
+}
+
+export interface SessionClosingResponses {
+  standout?: string
+  carryForward?: string
+  mood?: SessionClosingMood
+}
+
+export interface SetSessionIntentionRequest {
+  sessionId: string
+  intention: string
+}
+
+export interface BeginSessionClosingRequest {
+  sessionId: string
+}
+
+export interface CloseSessionRequest {
+  sessionId: string
+  closing: SessionClosingResponses
 }
 
 export interface ClarificationPayload {
@@ -148,6 +176,13 @@ export interface SessionChatApi {
   listSessions: () => Promise<SessionChatResult<{ sessions: SessionSummary[] }>>
   createSession: () => Promise<SessionChatResult<CreateSessionSuccess>>
   getSession: (request: GetSessionRequest) => Promise<SessionChatResult<SessionDetail>>
+  setSessionIntention: (
+    request: SetSessionIntentionRequest
+  ) => Promise<SessionChatResult<SessionDetail>>
+  beginSessionClosing: (
+    request: BeginSessionClosingRequest
+  ) => Promise<SessionChatResult<SessionDetail>>
+  closeSession: (request: CloseSessionRequest) => Promise<SessionChatResult<SessionDetail>>
   sendMessage: (request: SendMessageRequest) => Promise<SessionChatResult<SendMessageSuccess>>
   onChatStreamEvent: (listener: (event: ChatStreamEvent) => void) => () => void
 }

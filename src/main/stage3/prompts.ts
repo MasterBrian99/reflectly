@@ -93,6 +93,7 @@ export function buildStage3Prompt(options: {
   messageId: string
   sessionId: string
   latestUserMessage: string
+  sessionIntention?: string | null
   currentSessionSummary?: string | null
   recentTranscript: Array<{ role: string; content: string }>
   stage1Output: Stage1ParseOutput
@@ -106,6 +107,15 @@ export function buildStage3Prompt(options: {
     `messageId: ${options.messageId}`,
     `sessionId: ${options.sessionId}`,
     `Current session summary: ${options.currentSessionSummary?.trim() || 'None yet.'}`,
+    ...(options.sessionIntention?.trim()
+      ? [
+          '',
+          'Session intention (set by user at session start):',
+          options.sessionIntention.trim(),
+          '',
+          'Consider this intention when choosing supportMode, depthLevel, and responsePlan.'
+        ]
+      : []),
     '',
     'Recent transcript:',
     transcript || 'None yet.',

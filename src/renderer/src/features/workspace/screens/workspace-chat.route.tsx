@@ -12,12 +12,18 @@ export function WorkspaceChatRoute(): React.JSX.Element {
         detail={sessionShell.activeDetail}
         isLoadingSession={sessionShell.isLoadingSession}
         isSendingMessage={sessionShell.isSendingMessage}
+        isUpdatingSessionLifecycle={sessionShell.isUpdatingSessionLifecycle}
         sendError={sessionShell.sendError}
         streamingAssistantContent={streamingAssistantContent}
         activeAgentActivities={activeAgentActivities}
         agentActivitiesByMessageId={sessionShell.agentActivitiesByMessageId}
         clarificationControlsByMessageId={sessionShell.clarificationControlsByMessageId}
         onCreateSession={sessionShell.createSession}
+        onSetIntention={sessionShell.setIntention}
+        onSkipIntention={sessionShell.skipIntention}
+        onBeginClosing={sessionShell.beginClosing}
+        onCloseSession={sessionShell.closeSession}
+        onSkipClosing={sessionShell.skipClosing}
         onSendMessage={sessionShell.sendMessage}
       />
     </section>

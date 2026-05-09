@@ -1,4 +1,5 @@
 import {
+  CheckCircle2,
   CircleHelp,
   Compass,
   Home,
@@ -26,6 +27,35 @@ type WorkspaceSidebarProps = {
 
 function formatSessionLabel(title: string): string {
   return title.trim() || 'Untitled session'
+}
+
+function PhaseIndicator({ phase }: { phase: SessionSummary['phase'] }): React.JSX.Element | null {
+  if (phase === 'opening') {
+    return (
+      <span className="rounded-full bg-white/70 px-2 py-0.5 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-primary">
+        New
+      </span>
+    )
+  }
+
+  if (phase === 'completed') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-[#f0f7f1] px-2 py-0.5 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-success">
+        <CheckCircle2 className="size-3" />
+        Done
+      </span>
+    )
+  }
+
+  if (phase === 'closing') {
+    return (
+      <span className="rounded-full bg-[#fff8ea] px-2 py-0.5 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-warning">
+        Closing
+      </span>
+    )
+  }
+
+  return null
 }
 
 export function WorkspaceSidebar({
@@ -123,7 +153,10 @@ export function WorkspaceSidebar({
                   onClick={() => void handleSelectSession(session.id)}
                   disabled={isBusy}
                 >
-                  {formatSessionLabel(session.title)}
+                  <span className="flex min-w-0 items-center justify-between gap-2">
+                    <span className="truncate">{formatSessionLabel(session.title)}</span>
+                    <PhaseIndicator phase={session.phase} />
+                  </span>
                 </button>
               ))}
               {sessions.length === 0 ? (

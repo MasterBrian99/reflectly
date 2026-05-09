@@ -5,10 +5,15 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { openWorkspaceDatabase } from '../workspace/database'
 import {
+  beginSessionClosing,
+  closeSession,
   createSession,
+  getLatestMessageForSession,
   getSessionDetail,
+  listSessions,
   persistAssistantMessage,
   persistUserMessageAndLoadContext,
+  setSessionIntention,
   upsertMessageAgentActivities
 } from './repository'
 
@@ -28,6 +33,12 @@ async function createWorkspaceFixture(): Promise<{
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active',
+      phase TEXT NOT NULL DEFAULT 'working' CHECK(phase IN ('opening', 'working', 'closing', 'completed')),
+      intention TEXT,
+      closing_standout TEXT,
+      closing_carry_forward TEXT,
+      closing_mood INTEGER CHECK(closing_mood BETWEEN 1 AND 5),
+      completed_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     ) STRICT;
@@ -80,6 +91,99 @@ async function createWorkspaceFixture(): Promise<{
     cleanup: () => rm(workspacePath, { recursive: true, force: true })
   }
 }
+
+test('createSession starts in opening phase and listSessions includes phase', async (t) => {
+  const fixture = await createWorkspaceFixture()
+  t.after(async () => fixture.cleanup())
+
+  const createdSession = createSession(fixture.workspacePath)
+  const sessions = listSessions(fixture.workspacePath)
+
+  assert.equal(createdSession.session.phase, 'opening')
+  assert.equal(createdSession.session.intention, undefined)
+  assert.equal(sessions[0]?.id, createdSession.session.id)
+  assert.equal(sessions[0]?.phase, 'opening')
+})
+
+test('setSessionIntention stores trimmed intention and moves to working phase', async (t) => {
+  const fixture = await createWorkspaceFixture()
+  t.after(async () => fixture.cleanup())
+
+  const createdSession = createSession(fixture.workspacePath)
+  const updatedSession = setSessionIntention(
+    fixture.workspacePath,
+    createdSession.session.id,
+    '  Make sense of my week.  '
+  )
+
+  assert.equal(updatedSession?.session.phase, 'working')
+  assert.equal(updatedSession?.session.intention, 'Make sense of my week.')
+})
+
+test('setSessionIntention with empty text moves to working without intention', async (t) => {
+  const fixture = await createWorkspaceFixture()
+  t.after(async () => fixture.cleanup())
+
+  const createdSession = createSession(fixture.workspacePath)
+  const updatedSession = setSessionIntention(fixture.workspacePath, createdSession.session.id, '')
+
+  assert.equal(updatedSession?.session.phase, 'working')
+  assert.equal(updatedSession?.session.intention, undefined)
+})
+
+test('beginSessionClosing moves a working session to closing phase', async (t) => {
+  const fixture = await createWorkspaceFixture()
+  t.after(async () => fixture.cleanup())
+
+  const createdSession = createSession(fixture.workspacePath)
+  setSessionIntention(fixture.workspacePath, createdSession.session.id, '')
+
+  const updatedSession = beginSessionClosing(fixture.workspacePath, createdSession.session.id)
+
+  assert.equal(updatedSession?.session.phase, 'closing')
+})
+
+test('closeSession stores closing responses and completes the session', async (t) => {
+  const fixture = await createWorkspaceFixture()
+  t.after(async () => fixture.cleanup())
+
+  const createdSession = createSession(fixture.workspacePath)
+  const userState = persistUserMessageAndLoadContext(
+    fixture.workspacePath,
+    createdSession.session.id,
+    'I want to remember this.'
+  )
+
+  assert.ok(userState)
+
+  const latestMessage = getLatestMessageForSession(fixture.workspacePath, createdSession.session.id)
+  const updatedSession = closeSession(fixture.workspacePath, createdSession.session.id, {
+    standout: 'I named the hard part.',
+    carryForward: 'Pause before reacting.',
+    mood: 4
+  })
+
+  assert.equal(latestMessage?.id, userState.userMessage.id)
+  assert.equal(updatedSession?.session.phase, 'completed')
+  assert.equal(updatedSession?.session.closingStandout, 'I named the hard part.')
+  assert.equal(updatedSession?.session.closingCarryForward, 'Pause before reacting.')
+  assert.equal(updatedSession?.session.closingMood, 4)
+  assert.ok(updatedSession?.session.completedAt)
+})
+
+test('closeSession with empty responses still completes the session', async (t) => {
+  const fixture = await createWorkspaceFixture()
+  t.after(async () => fixture.cleanup())
+
+  const createdSession = createSession(fixture.workspacePath)
+  const updatedSession = closeSession(fixture.workspacePath, createdSession.session.id, {})
+
+  assert.equal(updatedSession?.session.phase, 'completed')
+  assert.equal(updatedSession?.session.closingStandout, undefined)
+  assert.equal(updatedSession?.session.closingCarryForward, undefined)
+  assert.equal(updatedSession?.session.closingMood, undefined)
+  assert.ok(updatedSession?.session.completedAt)
+})
 
 test('session repository persists agent activities with assistant messages', async (t) => {
   const fixture = await createWorkspaceFixture()

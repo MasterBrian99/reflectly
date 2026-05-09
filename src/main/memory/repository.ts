@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { openWorkspaceDatabase } from '../workspace/database'
 import { serializeFloat32Vector, deserializeFloat32Vector } from './vector-utils'
 
-export type MemoryChunkKind = 'turn_summary'
+export type MemoryChunkKind = 'turn_summary' | 'carry_forward'
 export type RetrievalCandidateType = 'memory_chunk' | 'session_summary'
 
 export interface PersistedSessionSummary {

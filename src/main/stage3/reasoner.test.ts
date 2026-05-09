@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import type { Stage1ParseOutput } from '../stage1/types'
 import { buildFallbackStage3Output, parseStage3ReasoningOutput } from './reasoner'
+import { buildStage3Prompt } from './prompts'
 
 const validPayload = {
   schemaVersion: 1,
@@ -31,6 +33,31 @@ const validPayload = {
   }
 }
 
+const minimalStage1Output: Stage1ParseOutput = {
+  schemaVersion: 1,
+  messageId: 'message-a',
+  sessionId: 'session-a',
+  summary: 'The user wants a calmer evening.',
+  emotionalTone: {
+    primary: 'tired',
+    secondary: [],
+    valence: -0.2,
+    arousal: 0.3,
+    confidence: 0.7
+  },
+  intent: {
+    expressed: 'I want tonight to feel calmer.',
+    inferred: 'The user wants reflective support.',
+    category: 'reflect',
+    confidence: 0.7
+  },
+  entities: [],
+  goalHints: [],
+  contextGaps: [],
+  riskMarkers: [],
+  shouldClarify: false
+}
+
 test('parseStage3ReasoningOutput accepts valid model JSON and stamps trusted IDs', () => {
   const parsed = parseStage3ReasoningOutput(JSON.stringify(validPayload), {
     messageId: 'message-a',
@@ -48,6 +75,23 @@ test('parseStage3ReasoningOutput accepts valid model JSON and stamps trusted IDs
   assert.equal(parsed.responsePlan.openingMove, 'Acknowledge the feeling of being stuck.')
   assert.equal(parsed.responsePlan.keyPoints.length, 2)
   assert.equal(parsed.safetyNotes.hasActiveRiskMarkers, false)
+})
+
+test('buildStage3Prompt includes session intention when available', () => {
+  const prompt = buildStage3Prompt({
+    messageId: 'message-a',
+    sessionId: 'session-a',
+    latestUserMessage: 'I want tonight to feel calmer.',
+    sessionIntention: 'Make sense of my stress before bed.',
+    currentSessionSummary: null,
+    recentTranscript: [],
+    stage1Output: minimalStage1Output,
+    retrievedMemory: []
+  })
+
+  assert.ok(prompt.includes('Session intention (set by user at session start):'))
+  assert.ok(prompt.includes('Make sense of my stress before bed.'))
+  assert.ok(prompt.includes('Consider this intention'))
 })
 
 test('parseStage3ReasoningOutput extracts JSON from markdown code fences', () => {

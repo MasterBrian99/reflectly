@@ -231,6 +231,21 @@ const migrations: MigrationDefinition[] = [
       CREATE INDEX IF NOT EXISTS idx_stage3_reasoning_outputs_session_created_at
       ON stage3_reasoning_outputs(session_id, created_at DESC, message_id DESC);
     `
+  },
+  {
+    name: '0011_session_lifecycle',
+    sql: `
+      ALTER TABLE sessions ADD COLUMN phase TEXT NOT NULL DEFAULT 'working'
+        CHECK(phase IN ('opening', 'working', 'closing', 'completed'));
+      ALTER TABLE sessions ADD COLUMN intention TEXT;
+      ALTER TABLE sessions ADD COLUMN closing_standout TEXT;
+      ALTER TABLE sessions ADD COLUMN closing_carry_forward TEXT;
+      ALTER TABLE sessions ADD COLUMN closing_mood INTEGER CHECK(closing_mood BETWEEN 1 AND 5);
+      ALTER TABLE sessions ADD COLUMN completed_at TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_sessions_phase
+      ON sessions(phase, updated_at DESC);
+    `
   }
 ]
 

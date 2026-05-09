@@ -1,4 +1,4 @@
-import { MessageSquarePlus, Sparkles } from 'lucide-react'
+import { CheckCircle2, MessageSquarePlus, Sparkles } from 'lucide-react'
 import type { SessionSummary } from '@shared/session-chat'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -18,6 +18,35 @@ function formatSessionDate(isoTimestamp: string): string {
     month: 'short',
     day: 'numeric'
   }).format(new Date(isoTimestamp))
+}
+
+function PhaseIndicator({ phase }: { phase: SessionSummary['phase'] }): React.JSX.Element | null {
+  if (phase === 'opening') {
+    return (
+      <span className="rounded-full bg-white/70 px-2 py-0.5 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-primary">
+        New
+      </span>
+    )
+  }
+
+  if (phase === 'completed') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-[#f0f7f1] px-2 py-0.5 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-success">
+        <CheckCircle2 className="size-3" />
+        Done
+      </span>
+    )
+  }
+
+  if (phase === 'closing') {
+    return (
+      <span className="rounded-full bg-[#fff8ea] px-2 py-0.5 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-warning">
+        Closing
+      </span>
+    )
+  }
+
+  return null
 }
 
 export function SessionList({
@@ -85,9 +114,12 @@ export function SessionList({
                             {session.messageCount === 1 ? 'message' : 'messages'}
                           </p>
                         </div>
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {formatSessionDate(session.updatedAt)}
-                        </span>
+                        <div className="flex shrink-0 flex-col items-end gap-2">
+                          <span className="text-xs text-muted-foreground">
+                            {formatSessionDate(session.updatedAt)}
+                          </span>
+                          <PhaseIndicator phase={session.phase} />
+                        </div>
                       </div>
                     </button>
                   )

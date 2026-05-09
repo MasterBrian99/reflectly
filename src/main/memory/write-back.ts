@@ -1,6 +1,10 @@
 import { embed, generateText } from 'ai'
 import type { AppSettings } from '../../shared/app-settings'
-import type { MessageRecord, SessionSummary } from '../../shared/session-chat'
+import type {
+  MessageRecord,
+  SessionClosingResponses,
+  SessionSummary
+} from '../../shared/session-chat'
 import {
   ChatProviderRegistryBuilder,
   EmbeddingProviderRegistryBuilder
@@ -153,6 +157,66 @@ async function buildEmbeddingPayloads(options: {
   }
 }
 
+async function buildSingleEmbeddingPayload(options: {
+  settings: AppSettings
+  value: string
+}): Promise<{
+  embeddingProvider: string | null
+  embeddingModel: string | null
+  embeddingVector: number[] | null
+}> {
+  const registry = new EmbeddingProviderRegistryBuilder(options.settings)
+
+  if (!registry.isConfigured()) {
+    return {
+      embeddingProvider: null,
+      embeddingModel: null,
+      embeddingVector: null
+    }
+  }
+
+  try {
+    const { model, provider, modelId } = registry.build()
+    const result = await embed({
+      model,
+      value: options.value,
+      maxRetries: 1
+    })
+
+    return {
+      embeddingProvider: provider.id,
+      embeddingModel: modelId,
+      embeddingVector: result.embedding
+    }
+  } catch (error) {
+    console.error('Embedding generation failed for closing memory. Saving text-only memory.', error)
+
+    return {
+      embeddingProvider: null,
+      embeddingModel: null,
+      embeddingVector: null
+    }
+  }
+}
+
+function formatClosingContext(closing: SessionClosingResponses): string | null {
+  const lines: string[] = []
+
+  if (closing.standout?.trim()) {
+    lines.push(`What stood out: ${closing.standout.trim()}`)
+  }
+
+  if (closing.carryForward?.trim()) {
+    lines.push(`Carry forward: ${closing.carryForward.trim()}`)
+  }
+
+  if (closing.mood) {
+    lines.push(`Final mood: ${closing.mood} out of 5`)
+  }
+
+  return lines.length ? ['Closing context:', ...lines].join('\n') : null
+}
+
 export async function writeSessionMemory(options: {
   workspacePath: string
   settings: AppSettings
@@ -197,4 +261,57 @@ export async function writeSessionMemory(options: {
   })
 
   return memorySummary
+}
+
+export async function writeSessionClosingMemory(options: {
+  workspacePath: string
+  settings: AppSettings
+  session: SessionSummary
+  sourceMessage: MessageRecord
+  closing: SessionClosingResponses
+  previousSessionSummary?: PersistedSessionSummary | null
+}): Promise<void> {
+  const closingContext = formatClosingContext(options.closing)
+
+  if (!closingContext) {
+    return
+  }
+
+  const previousSessionSummary =
+    options.previousSessionSummary ?? getSessionSummary(options.workspacePath, options.session.id)
+  const summaryText = previousSessionSummary?.summaryText?.trim()
+    ? `${previousSessionSummary.summaryText.trim()}\n\n${closingContext}`
+    : closingContext
+  const summaryEmbedding = await buildSingleEmbeddingPayload({
+    settings: options.settings,
+    value: summaryText
+  })
+
+  if (options.closing.carryForward?.trim()) {
+    const carryForward = options.closing.carryForward.trim()
+    const carryForwardEmbedding = await buildSingleEmbeddingPayload({
+      settings: options.settings,
+      value: carryForward
+    })
+
+    insertMemoryChunk(options.workspacePath, {
+      sessionId: options.session.id,
+      sourceMessageId: options.sourceMessage.id,
+      chunkKind: 'carry_forward',
+      content: carryForward,
+      embeddingProvider: carryForwardEmbedding.embeddingProvider,
+      embeddingModel: carryForwardEmbedding.embeddingModel,
+      embeddingVector: carryForwardEmbedding.embeddingVector
+    })
+  }
+
+  upsertSessionSummary(options.workspacePath, {
+    sessionId: options.session.id,
+    summaryText,
+    sourceMessageId: options.sourceMessage.id,
+    turnCountSnapshot: Math.floor(options.session.messageCount / 2),
+    embeddingProvider: summaryEmbedding.embeddingProvider,
+    embeddingModel: summaryEmbedding.embeddingModel,
+    embeddingVector: summaryEmbedding.embeddingVector
+  })
 }

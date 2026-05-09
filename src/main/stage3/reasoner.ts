@@ -228,6 +228,7 @@ export async function runStage3Reasoner(options: {
   stage1Output: Stage1ParseOutput
   currentSessionSummary?: PersistedSessionSummary | null
   retrievedMemory: RetrievedMemoryItem[]
+  sessionIntention?: string | null
 }): Promise<Stage3ReasoningOutput> {
   const fallback = buildFallbackStage3Output({
     messageId: options.userMessage.id,
@@ -247,6 +248,7 @@ export async function runStage3Reasoner(options: {
         messageId: options.userMessage.id,
         sessionId: options.userMessage.sessionId,
         latestUserMessage: options.userMessage.content,
+        sessionIntention: options.sessionIntention,
         currentSessionSummary: options.currentSessionSummary?.summaryText ?? null,
         recentTranscript: options.contextMessages.map((m) => ({
           role: m.role,

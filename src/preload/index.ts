@@ -12,6 +12,9 @@ const api: AppApi = {
   listSessions: () => ipcRenderer.invoke('sessions:list'),
   createSession: () => ipcRenderer.invoke('sessions:create'),
   getSession: (request) => ipcRenderer.invoke('sessions:get', request),
+  setSessionIntention: (request) => ipcRenderer.invoke('sessions:set-intention', request),
+  beginSessionClosing: (request) => ipcRenderer.invoke('sessions:begin-closing', request),
+  closeSession: (request) => ipcRenderer.invoke('sessions:close', request),
   sendMessage: (request) => ipcRenderer.invoke('chat:send-message', request),
   onChatStreamEvent: (listener: (event: ChatStreamEvent) => void) => {
     const wrappedListener = (_event: unknown, payload: ChatStreamEvent): void => {

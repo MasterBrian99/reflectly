@@ -11,7 +11,7 @@ import type {
 } from '../../shared/session-chat'
 import { getSessionSummary } from '../memory/repository'
 import { MemoryRetrievalService } from '../memory/retrieval'
-import { writeSessionMemory } from '../memory/write-back'
+import { writeSessionClosingMemory, writeSessionMemory } from '../memory/write-back'
 import { evaluateSafetyGate } from '../safety/gate'
 import { crisisInterruptMessage } from '../safety/messages'
 import { insertSafetyEvent } from '../safety/repository'
@@ -35,10 +35,14 @@ import { SessionChatAppError, toSessionChatError } from './error'
 import { streamAssistantReply } from './model-adapter'
 import {
   createSession,
+  beginSessionClosing,
+  closeSession,
+  getLatestMessageForSession,
   getSessionDetail,
   listSessions,
   persistAssistantMessage,
   persistUserMessageAndLoadContext,
+  setSessionIntention,
   upsertMessageAgentActivities
 } from './repository'
 
@@ -138,6 +142,126 @@ export function registerSessionChatIpc(): void {
         return {
           ok: true,
           data: detail
+        }
+      } catch (error) {
+        return failureResult(error)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'sessions:set-intention',
+    async (
+      _,
+      request: { sessionId: string; intention: string }
+    ): Promise<
+      SessionChatResult<
+        ReturnType<typeof getSessionDetail> extends infer T ? (T extends null ? never : T) : never
+      >
+    > => {
+      try {
+        const workspacePath = await resolveActiveWorkspacePath()
+        const detail = setSessionIntention(workspacePath, request.sessionId, request.intention)
+
+        if (!detail) {
+          throw new SessionChatAppError(
+            'SESSION_NOT_FOUND',
+            'That session no longer exists in this workspace.'
+          )
+        }
+
+        return {
+          ok: true,
+          data: detail
+        }
+      } catch (error) {
+        return failureResult(error)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'sessions:begin-closing',
+    async (
+      _,
+      request: { sessionId: string }
+    ): Promise<
+      SessionChatResult<
+        ReturnType<typeof getSessionDetail> extends infer T ? (T extends null ? never : T) : never
+      >
+    > => {
+      try {
+        const workspacePath = await resolveActiveWorkspacePath()
+        const detail = beginSessionClosing(workspacePath, request.sessionId)
+
+        if (!detail) {
+          throw new SessionChatAppError(
+            'SESSION_NOT_FOUND',
+            'That session no longer exists in this workspace.'
+          )
+        }
+
+        return {
+          ok: true,
+          data: detail
+        }
+      } catch (error) {
+        return failureResult(error)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'sessions:close',
+    async (
+      _,
+      request: {
+        sessionId: string
+        closing: {
+          standout?: string
+          carryForward?: string
+          mood?: 1 | 2 | 3 | 4 | 5
+        }
+      }
+    ): Promise<
+      SessionChatResult<
+        ReturnType<typeof getSessionDetail> extends infer T ? (T extends null ? never : T) : never
+      >
+    > => {
+      try {
+        const workspacePath = await resolveActiveWorkspacePath()
+        const settings = await readAppSettings()
+        const latestMessage = getLatestMessageForSession(workspacePath, request.sessionId)
+        const previousSessionSummary = getSessionSummary(workspacePath, request.sessionId)
+        const detail = closeSession(workspacePath, request.sessionId, request.closing)
+
+        if (!detail) {
+          throw new SessionChatAppError(
+            'SESSION_NOT_FOUND',
+            'That session no longer exists in this workspace.'
+          )
+        }
+
+        if (latestMessage) {
+          try {
+            await writeSessionClosingMemory({
+              workspacePath,
+              settings,
+              session: detail.session,
+              sourceMessage: latestMessage,
+              closing: request.closing,
+              previousSessionSummary
+            })
+          } catch (error) {
+            console.error('Closing memory enrichment failed after session completion.', error)
+          }
+        }
+
+        const updatedDetail = getSessionDetail(workspacePath, request.sessionId) ?? detail
+
+        return {
+          ok: true,
+          data: updatedDetail
         }
       } catch (error) {
         return failureResult(error)
@@ -383,11 +507,14 @@ export function registerSessionChatIpc(): void {
                 label: 'Searching memory',
                 detail: 'Looking for relevant workspace context before generation.'
               })
+              const retrievalQueryText = persistedUserState.session.intention
+                ? `${persistedUserState.userMessage.content}\n\nSession intention: ${persistedUserState.session.intention}`
+                : persistedUserState.userMessage.content
               const retrievedMemory = await memoryRetrievalService.retrieve({
                 workspacePath,
                 settings,
                 activeSessionId: request.sessionId,
-                queryText: persistedUserState.userMessage.content
+                queryText: retrievalQueryText
               })
               emitActivity({
                 id: 'memory-retrieval',
@@ -411,7 +538,8 @@ export function registerSessionChatIpc(): void {
                 contextMessages: persistedUserState.contextMessages,
                 stage1Output,
                 currentSessionSummary,
-                retrievedMemory
+                retrievedMemory,
+                sessionIntention: persistedUserState.session.intention ?? null
               })
 
               try {
