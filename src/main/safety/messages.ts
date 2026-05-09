@@ -1,0 +1,2 @@
+export const crisisInterruptMessage =
+  "I'm really sorry you're feeling this much right now. If there's any immediate danger, please contact local emergency services now or reach out to someone you trust who can stay with you. If you're in the U.S., you can call or text 988 for the Suicide & Crisis Lifeline. We can keep this simple here: what's one thing you can do in the next minute to be a little safer?"

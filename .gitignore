@@ -4,3 +4,8 @@ out
 .DS_Store
 .eslintcache
 *.log*
+# convo.md
+
+.env
+.env.*
+/docs

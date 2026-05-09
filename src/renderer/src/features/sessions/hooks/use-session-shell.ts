@@ -1,0 +1,608 @@
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type {
+  AgentActivityItem,
+  ChatStreamEvent,
+  ClarificationPayload,
+  MessageRecord,
+  SafetyInterruptMetadata,
+  SessionClosingResponses,
+  SessionChatError,
+  SessionDetail,
+  SessionSummary
+} from '@shared/session-chat'
+import { sessionIpcService } from '../services/session-ipc.service'
+
+interface StreamingAssistantState {
+  requestId: string
+  sessionId: string
+  content: string
+}
+
+type ClarificationControlsByMessageId = Record<string, ClarificationPayload>
+type AgentActivitiesByRequestId = Record<string, AgentActivityItem[]>
+type AgentActivitiesByMessageId = Record<string, AgentActivityItem[]>
+
+function sortSessions(sessions: SessionSummary[]): SessionSummary[] {
+  return [...sessions].sort((left, right) => {
+    if (left.updatedAt !== right.updatedAt) {
+      return right.updatedAt.localeCompare(left.updatedAt)
+    }
+
+    if (left.createdAt !== right.createdAt) {
+      return right.createdAt.localeCompare(left.createdAt)
+    }
+
+    return right.id.localeCompare(left.id)
+  })
+}
+
+function mergeSession(sessions: SessionSummary[], nextSession: SessionSummary): SessionSummary[] {
+  const remainingSessions = sessions.filter((session) => session.id !== nextSession.id)
+  return sortSessions([nextSession, ...remainingSessions])
+}
+
+function appendUniqueMessage(
+  messages: MessageRecord[],
+  nextMessage: MessageRecord
+): MessageRecord[] {
+  if (messages.some((message) => message.id === nextMessage.id)) {
+    return messages
+  }
+
+  return [...messages, nextMessage]
+}
+
+function buildDetail(
+  session: SessionSummary,
+  nextMessages: MessageRecord[],
+  agentActivitiesByMessageId: AgentActivitiesByMessageId,
+  safetyByMessageId?: Record<string, SafetyInterruptMetadata>
+): SessionDetail {
+  return {
+    session,
+    messages: nextMessages,
+    agentActivitiesByMessageId,
+    ...(safetyByMessageId ? { safetyByMessageId } : {})
+  }
+}
+
+function mergeRequestActivity(
+  currentActivities: AgentActivitiesByRequestId,
+  requestId: string,
+  nextActivity: AgentActivityItem
+): AgentActivitiesByRequestId {
+  const requestActivities = currentActivities[requestId] ?? []
+  const existingIndex = requestActivities.findIndex((activity) => activity.id === nextActivity.id)
+  const nextActivities =
+    existingIndex >= 0
+      ? requestActivities.map((activity, index) =>
+          index === existingIndex ? nextActivity : activity
+        )
+      : [...requestActivities, nextActivity]
+
+  return {
+    ...currentActivities,
+    [requestId]: nextActivities
+  }
+}
+
+function takeRequestActivities(
+  currentActivities: AgentActivitiesByRequestId,
+  requestId: string
+): {
+  completedActivities: AgentActivityItem[]
+  nextActivitiesByRequestId: AgentActivitiesByRequestId
+} {
+  const completedActivities = currentActivities[requestId] ?? []
+  const nextActivitiesByRequestId = { ...currentActivities }
+  delete nextActivitiesByRequestId[requestId]
+
+  return {
+    completedActivities,
+    nextActivitiesByRequestId
+  }
+}
+
+function isMatchingStream(
+  activeStream: StreamingAssistantState | null,
+  event: ChatStreamEvent
+): activeStream is StreamingAssistantState {
+  return Boolean(activeStream && activeStream.requestId === event.requestId)
+}
+
+export function useSessionShell(): {
+  sessions: SessionSummary[]
+  activeDetail: SessionDetail | null
+  selectedSessionId: string | null
+  isLoading: boolean
+  isCreatingSession: boolean
+  isLoadingSession: boolean
+  isSendingMessage: boolean
+  isUpdatingSessionLifecycle: boolean
+  selectionError: string | null
+  sendError: SessionChatError | null
+  streamingAssistant: StreamingAssistantState | null
+  clarificationControlsByMessageId: ClarificationControlsByMessageId
+  agentActivitiesByRequestId: AgentActivitiesByRequestId
+  agentActivitiesByMessageId: AgentActivitiesByMessageId
+  createSession: () => Promise<void>
+  selectSession: (sessionId: string) => Promise<void>
+  setIntention: (intention: string) => Promise<void>
+  skipIntention: () => Promise<void>
+  beginClosing: () => Promise<void>
+  closeSession: (closing: SessionClosingResponses) => Promise<void>
+  skipClosing: () => Promise<void>
+  sendMessage: (content: string) => Promise<SessionChatError | null>
+} {
+  const [sessions, setSessions] = useState<SessionSummary[]>([])
+  const [activeDetail, setActiveDetail] = useState<SessionDetail | null>(null)
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [isCreatingSession, setIsCreatingSession] = useState(false)
+  const [isLoadingSession, setIsLoadingSession] = useState(false)
+  const [isSendingMessage, setIsSendingMessage] = useState(false)
+  const [isUpdatingSessionLifecycle, setIsUpdatingSessionLifecycle] = useState(false)
+  const [selectionError, setSelectionError] = useState<string | null>(null)
+  const [sendError, setSendError] = useState<SessionChatError | null>(null)
+  const [streamingAssistant, setStreamingAssistant] = useState<StreamingAssistantState | null>(null)
+  const [clarificationControlsByMessageId, setClarificationControlsByMessageId] =
+    useState<ClarificationControlsByMessageId>({})
+  const [agentActivitiesByRequestId, setAgentActivitiesByRequestId] =
+    useState<AgentActivitiesByRequestId>({})
+  const [agentActivitiesByMessageId, setAgentActivitiesByMessageId] =
+    useState<AgentActivitiesByMessageId>({})
+  const agentActivitiesByRequestIdRef = useRef<AgentActivitiesByRequestId>({})
+
+  const selectedSummary = useMemo(
+    () => sessions.find((session) => session.id === selectedSessionId) ?? null,
+    [selectedSessionId, sessions]
+  )
+
+  const applySessionDetail = useCallback((detail: SessionDetail): void => {
+    startTransition(() => {
+      setActiveDetail(detail)
+      setAgentActivitiesByMessageId(detail.agentActivitiesByMessageId)
+      setSessions((currentSessions) => mergeSession(currentSessions, detail.session))
+      setSelectedSessionId(detail.session.id)
+    })
+  }, [])
+
+  const loadSession = useCallback(
+    async (sessionId: string): Promise<void> => {
+      setIsLoadingSession(true)
+      setSelectionError(null)
+
+      const result = await sessionIpcService.getSession({ sessionId })
+
+      if (!result.ok) {
+        setSelectionError(result.error.message)
+        setIsLoadingSession(false)
+        return
+      }
+
+      applySessionDetail(result.data)
+      setIsLoadingSession(false)
+    },
+    [applySessionDetail]
+  )
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      void (async () => {
+        setIsLoading(true)
+        setSelectionError(null)
+
+        const result = await sessionIpcService.listSessions()
+
+        if (!result.ok) {
+          setSelectionError(result.error.message)
+          setIsLoading(false)
+          return
+        }
+
+        const nextSessions = sortSessions(result.data.sessions)
+        const nextSelectedSessionId = nextSessions[0]?.id ?? null
+
+        startTransition(() => {
+          setSessions(nextSessions)
+          setSelectedSessionId(nextSelectedSessionId)
+
+          if (!nextSelectedSessionId) {
+            setActiveDetail(null)
+            setAgentActivitiesByMessageId({})
+          }
+        })
+        setIsLoading(false)
+
+        if (nextSelectedSessionId) {
+          await loadSession(nextSelectedSessionId)
+        }
+      })()
+    })
+  }, [loadSession])
+
+  useEffect(() => {
+    const unsubscribe = sessionIpcService.onChatStreamEvent((event) => {
+      const activityState =
+        event.type === 'activity'
+          ? mergeRequestActivity(
+              agentActivitiesByRequestIdRef.current,
+              event.requestId,
+              event.activity
+            )
+          : null
+      const completedActivityState =
+        event.type === 'complete' ||
+        event.type === 'clarification' ||
+        event.type === 'safety_interrupt'
+          ? takeRequestActivities(agentActivitiesByRequestIdRef.current, event.requestId)
+          : null
+
+      if (activityState) {
+        agentActivitiesByRequestIdRef.current = activityState
+      }
+
+      if (completedActivityState) {
+        agentActivitiesByRequestIdRef.current = completedActivityState.nextActivitiesByRequestId
+      }
+
+      startTransition(() => {
+        setStreamingAssistant((currentStream) => {
+          if (!isMatchingStream(currentStream, event)) {
+            return currentStream
+          }
+
+          if (event.type === 'delta') {
+            return {
+              ...currentStream,
+              content: currentStream.content + event.delta
+            }
+          }
+
+          if (event.type === 'activity') {
+            return currentStream
+          }
+
+          return null
+        })
+
+        if (event.type === 'activity') {
+          setAgentActivitiesByRequestId(activityState ?? agentActivitiesByRequestIdRef.current)
+          return
+        }
+
+        if (event.type === 'complete') {
+          const completedActivities = completedActivityState?.completedActivities ?? []
+          setAgentActivitiesByRequestId(
+            completedActivityState?.nextActivitiesByRequestId ??
+              agentActivitiesByRequestIdRef.current
+          )
+          setAgentActivitiesByMessageId((currentActivities) => ({
+            ...currentActivities,
+            [event.assistantMessage.id]: completedActivities
+          }))
+          setSessions((currentSessions) => mergeSession(currentSessions, event.session))
+          setActiveDetail((currentDetail) => {
+            if (currentDetail?.session.id !== event.sessionId) {
+              return currentDetail
+            }
+
+            const nextMessages = appendUniqueMessage(currentDetail.messages, event.assistantMessage)
+
+            return buildDetail(
+              event.session,
+              nextMessages,
+              {
+                ...currentDetail.agentActivitiesByMessageId,
+                [event.assistantMessage.id]: completedActivities
+              },
+              currentDetail.safetyByMessageId
+            )
+          })
+          setIsSendingMessage(false)
+          return
+        }
+
+        if (event.type === 'clarification') {
+          const completedActivities = completedActivityState?.completedActivities ?? []
+          setAgentActivitiesByRequestId(
+            completedActivityState?.nextActivitiesByRequestId ??
+              agentActivitiesByRequestIdRef.current
+          )
+          setAgentActivitiesByMessageId((currentActivities) => ({
+            ...currentActivities,
+            [event.assistantMessage.id]: completedActivities
+          }))
+          setSessions((currentSessions) => mergeSession(currentSessions, event.session))
+          setClarificationControlsByMessageId((currentControls) => ({
+            ...currentControls,
+            [event.assistantMessage.id]: event.clarification
+          }))
+          setActiveDetail((currentDetail) => {
+            if (currentDetail?.session.id !== event.sessionId) {
+              return currentDetail
+            }
+
+            const nextMessages = appendUniqueMessage(currentDetail.messages, event.assistantMessage)
+
+            return buildDetail(
+              event.session,
+              nextMessages,
+              {
+                ...currentDetail.agentActivitiesByMessageId,
+                [event.assistantMessage.id]: completedActivities
+              },
+              currentDetail.safetyByMessageId
+            )
+          })
+          setIsSendingMessage(false)
+          return
+        }
+
+        if (event.type === 'safety_interrupt') {
+          const completedActivities = completedActivityState?.completedActivities ?? []
+          setAgentActivitiesByRequestId(
+            completedActivityState?.nextActivitiesByRequestId ??
+              agentActivitiesByRequestIdRef.current
+          )
+          setAgentActivitiesByMessageId((currentActivities) => ({
+            ...currentActivities,
+            [event.assistantMessage.id]: completedActivities
+          }))
+          setSessions((currentSessions) => mergeSession(currentSessions, event.session))
+          setActiveDetail((currentDetail) => {
+            if (currentDetail?.session.id !== event.sessionId) {
+              return currentDetail
+            }
+
+            const nextMessages = appendUniqueMessage(currentDetail.messages, event.assistantMessage)
+            const safetyByMessageId = {
+              ...(currentDetail.safetyByMessageId ?? {}),
+              [event.assistantMessage.id]: event.safety
+            }
+
+            return buildDetail(
+              event.session,
+              nextMessages,
+              {
+                ...currentDetail.agentActivitiesByMessageId,
+                [event.assistantMessage.id]: completedActivities
+              },
+              safetyByMessageId
+            )
+          })
+          setIsSendingMessage(false)
+          return
+        }
+
+        if (event.type === 'error') {
+          setSendError(event.error)
+
+          if (event.error.session) {
+            setSessions((currentSessions) => mergeSession(currentSessions, event.error.session!))
+          }
+
+          setIsSendingMessage(false)
+        }
+      })
+    })
+
+    return unsubscribe
+  }, [])
+
+  async function createSession(): Promise<void> {
+    setIsCreatingSession(true)
+    setSelectionError(null)
+
+    const result = await sessionIpcService.createSession()
+
+    if (!result.ok) {
+      setSelectionError(result.error.message)
+      setIsCreatingSession(false)
+      return
+    }
+
+    startTransition(() => {
+      setSessions((currentSessions) => mergeSession(currentSessions, result.data.session))
+      setActiveDetail(result.data)
+      setAgentActivitiesByMessageId(result.data.agentActivitiesByMessageId)
+      setSelectedSessionId(result.data.session.id)
+      setSendError(null)
+    })
+    setIsCreatingSession(false)
+  }
+
+  async function selectSession(sessionId: string): Promise<void> {
+    if (sessionId === selectedSessionId && activeDetail?.session.id === sessionId) {
+      return
+    }
+
+    setSelectedSessionId(sessionId)
+    await loadSession(sessionId)
+  }
+
+  async function setIntention(intention: string): Promise<void> {
+    const activeSessionId = activeDetail?.session.id ?? selectedSummary?.id
+
+    if (!activeSessionId || isUpdatingSessionLifecycle) {
+      return
+    }
+
+    setIsUpdatingSessionLifecycle(true)
+    setSelectionError(null)
+
+    const result = await sessionIpcService.setSessionIntention({
+      sessionId: activeSessionId,
+      intention
+    })
+
+    if (!result.ok) {
+      setSelectionError(result.error.message)
+      setIsUpdatingSessionLifecycle(false)
+      return
+    }
+
+    applySessionDetail(result.data)
+    setIsUpdatingSessionLifecycle(false)
+  }
+
+  async function skipIntention(): Promise<void> {
+    await setIntention('')
+  }
+
+  async function beginClosing(): Promise<void> {
+    const activeSessionId = activeDetail?.session.id ?? selectedSummary?.id
+
+    if (!activeSessionId || isUpdatingSessionLifecycle || isSendingMessage) {
+      return
+    }
+
+    setIsUpdatingSessionLifecycle(true)
+    setSelectionError(null)
+
+    const result = await sessionIpcService.beginSessionClosing({
+      sessionId: activeSessionId
+    })
+
+    if (!result.ok) {
+      setSelectionError(result.error.message)
+      setIsUpdatingSessionLifecycle(false)
+      return
+    }
+
+    applySessionDetail(result.data)
+    setIsUpdatingSessionLifecycle(false)
+  }
+
+  async function closeSession(closing: SessionClosingResponses): Promise<void> {
+    const activeSessionId = activeDetail?.session.id ?? selectedSummary?.id
+
+    if (!activeSessionId || isUpdatingSessionLifecycle || isSendingMessage) {
+      return
+    }
+
+    setIsUpdatingSessionLifecycle(true)
+    setSelectionError(null)
+
+    const result = await sessionIpcService.closeSession({
+      sessionId: activeSessionId,
+      closing
+    })
+
+    if (!result.ok) {
+      setSelectionError(result.error.message)
+      setIsUpdatingSessionLifecycle(false)
+      return
+    }
+
+    applySessionDetail(result.data)
+    setIsUpdatingSessionLifecycle(false)
+  }
+
+  async function skipClosing(): Promise<void> {
+    await closeSession({})
+  }
+
+  async function sendMessage(content: string): Promise<SessionChatError | null> {
+    const activeSessionId = activeDetail?.session.id ?? selectedSummary?.id
+
+    if (!activeSessionId || isSendingMessage) {
+      return null
+    }
+
+    setSendError(null)
+    setIsSendingMessage(true)
+
+    const result = await sessionIpcService.sendMessage({
+      sessionId: activeSessionId,
+      content
+    })
+
+    if (!result.ok) {
+      startTransition(() => {
+        setSendError(result.error)
+
+        if (result.error.session) {
+          setSessions((currentSessions) => mergeSession(currentSessions, result.error.session!))
+        }
+
+        if (
+          result.error.session &&
+          result.error.userMessage &&
+          activeDetail?.session.id === activeSessionId
+        ) {
+          setActiveDetail((currentDetail) => {
+            const nextMessages = appendUniqueMessage(
+              currentDetail?.messages ?? [],
+              result.error.userMessage!
+            )
+            return buildDetail(
+              result.error.session!,
+              nextMessages,
+              currentDetail?.agentActivitiesByMessageId ?? agentActivitiesByMessageId,
+              currentDetail?.safetyByMessageId
+            )
+          })
+        }
+      })
+      setIsSendingMessage(false)
+      return result.error
+    }
+
+    const initialActivitiesByRequestId = {
+      ...agentActivitiesByRequestIdRef.current,
+      [result.data.requestId]: agentActivitiesByRequestIdRef.current[result.data.requestId] ?? []
+    }
+    agentActivitiesByRequestIdRef.current = initialActivitiesByRequestId
+
+    startTransition(() => {
+      setSessions((currentSessions) => mergeSession(currentSessions, result.data.session))
+      setStreamingAssistant({
+        requestId: result.data.requestId,
+        sessionId: result.data.session.id,
+        content: ''
+      })
+      setAgentActivitiesByRequestId(initialActivitiesByRequestId)
+      setClarificationControlsByMessageId({})
+      setActiveDetail((currentDetail) => {
+        const nextMessages = appendUniqueMessage(
+          currentDetail?.messages ?? [],
+          result.data.userMessage
+        )
+        return buildDetail(
+          result.data.session,
+          nextMessages,
+          currentDetail?.agentActivitiesByMessageId ?? agentActivitiesByMessageId,
+          currentDetail?.safetyByMessageId
+        )
+      })
+    })
+
+    return null
+  }
+
+  return {
+    sessions,
+    activeDetail,
+    selectedSessionId,
+    isLoading,
+    isCreatingSession,
+    isLoadingSession,
+    isSendingMessage,
+    isUpdatingSessionLifecycle,
+    selectionError,
+    sendError,
+    streamingAssistant,
+    clarificationControlsByMessageId,
+    agentActivitiesByRequestId,
+    agentActivitiesByMessageId,
+    createSession,
+    selectSession,
+    setIntention,
+    skipIntention,
+    beginClosing,
+    closeSession,
+    skipClosing,
+    sendMessage
+  }
+}

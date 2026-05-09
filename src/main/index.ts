@@ -1,7 +1,10 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { registerSettingsIpc } from './settings/ipc'
+import { registerSessionChatIpc } from './session-chat/ipc'
+import { registerWorkspaceIpc } from './workspace/ipc'
 
 function createWindow(): void {
   // Create the browser window.
@@ -49,8 +52,9 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
+  registerWorkspaceIpc()
+  registerSettingsIpc()
+  registerSessionChatIpc()
 
   createWindow()
 
