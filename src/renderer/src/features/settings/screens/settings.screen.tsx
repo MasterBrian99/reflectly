@@ -7,19 +7,30 @@ import type {
 import {
   BadgeCheck,
   Bot,
-  ListChecks,
+  Brain,
   FolderOpen,
   KeyRound,
+  ListChecks,
   LoaderCircle,
   Lock,
   ScanSearch,
+  Settings2,
   Shield,
   Trash2,
-  UserRound
+  UserRound,
+  Zap
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -43,6 +54,14 @@ type SettingsScreenProps = {
   onChatModelChange: (modelId: string) => void
   onChatApiKeyChange: (value: string) => void
   onChatBaseUrlChange: (value: string) => void
+  onStage1ProviderChange: (providerId: ChatProviderOption['id']) => void
+  onStage1ModelChange: (modelId: string) => void
+  onStage1ApiKeyChange: (value: string) => void
+  onStage1BaseUrlChange: (value: string) => void
+  onStage3ProviderChange: (providerId: ChatProviderOption['id']) => void
+  onStage3ModelChange: (modelId: string) => void
+  onStage3ApiKeyChange: (value: string) => void
+  onStage3BaseUrlChange: (value: string) => void
   onEmbeddingProviderChange: (providerId: EmbeddingProviderOption['id']) => void
   onEmbeddingModelChange: (modelId: string) => void
   onEmbeddingApiKeyChange: (value: string) => void
@@ -56,27 +75,6 @@ type SettingsScreenProps = {
     value: AppSettings['agentActivity']['reasoningSummary']
   ) => void
   onSave: () => Promise<void>
-}
-
-type SetupCardProps<PROVIDER_ID extends string> = {
-  title: string
-  description: string
-  providerLabel: string
-  modelValue: string
-  apiKeyValue: string
-  apiKeyLabel: string
-  apiKeyPlaceholder: string
-  isSaving: boolean
-  currentProvider: ProviderOption<PROVIDER_ID> | null
-  providers: Array<ProviderOption<PROVIDER_ID>>
-  onProviderChange: (providerId: PROVIDER_ID) => void
-  onModelChange: (modelId: string) => void
-  onApiKeyChange?: (value: string) => void
-  saveLabel: string
-  onSave?: () => Promise<void>
-  showLiveSave?: boolean
-  customBaseUrl?: string
-  onCustomBaseUrlChange?: (value: string) => void
 }
 
 function SectionHeading({
@@ -94,154 +92,229 @@ function SectionHeading({
   )
 }
 
-function SetupSummary({
-  providerLabel,
-  modelValue
-}: {
-  providerLabel: string
-  modelValue: string
-}): React.JSX.Element {
-  return (
-    <aside className="rounded-[1.4rem] border border-border/70 bg-[#edf4f1] p-5">
-      <div className="flex items-center gap-2 text-primary">
-        <KeyRound className="size-4" />
-        <p className="text-sm font-semibold uppercase tracking-[0.18em]">Active setup</p>
-      </div>
+// --- Stage Provider Dialog ---
 
-      <Separator className="my-4" />
-
-      <div className="space-y-3 text-sm leading-7 text-foreground/82">
-        <p>
-          <span className="font-medium text-foreground">Provider:</span> {providerLabel}
-        </p>
-        <p>
-          <span className="font-medium text-foreground">Model:</span> {modelValue}
-        </p>
-      </div>
-    </aside>
-  )
+type StageDialogProps<PROVIDER_ID extends string> = {
+  stageLabel: string
+  stageDescription: string
+  settings: { providerId: PROVIDER_ID; modelId: string; apiKey: string; baseUrl?: string }
+  providers: Array<ProviderOption<PROVIDER_ID>>
+  isSaving: boolean
+  onProviderChange: (providerId: PROVIDER_ID) => void
+  onModelChange: (modelId: string) => void
+  onApiKeyChange: (value: string) => void
+  onBaseUrlChange: (value: string) => void
+  onSave: () => Promise<void>
 }
 
-function SetupCard<PROVIDER_ID extends string>({
-  title,
-  description,
-  providerLabel,
-  modelValue,
-  apiKeyValue,
-  apiKeyLabel,
-  apiKeyPlaceholder,
-  isSaving,
-  currentProvider,
+function StageConfigDialog<PROVIDER_ID extends string>({
+  stageLabel,
+  stageDescription,
+  settings,
   providers,
+  isSaving,
   onProviderChange,
   onModelChange,
   onApiKeyChange,
-  saveLabel,
-  onSave,
-  showLiveSave = false,
-  customBaseUrl,
-  onCustomBaseUrlChange
-}: SetupCardProps<PROVIDER_ID>): React.JSX.Element {
+  onBaseUrlChange,
+  onSave
+}: StageDialogProps<PROVIDER_ID>): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const currentProvider =
+    providers.find((p) => p.id === settings.providerId) ?? providers[0] ?? null
+
+  async function handleSave(): Promise<void> {
+    await onSave()
+    setOpen(false)
+  }
+
   return (
-    <Card className="rounded-[2rem] border-border/70 bg-[#fffdf9] shadow-[0_12px_32px_rgba(55,78,75,0.06)]">
-      <CardContent className="p-6 md:p-8">
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_14rem]">
-          <div className="space-y-6">
-            <div className="space-y-2">
-              <h3 className="text-[2rem] leading-none tracking-[-0.03em] text-foreground">
-                {title}
-              </h3>
-              <p className="max-w-2xl text-base leading-7 text-muted-foreground">{description}</p>
-            </div>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button
+          variant="outline"
+          className="rounded-2xl border-border/70 px-4 text-sm hover:bg-[#edf4f1]"
+        >
+          <Settings2 className="mr-1.5 size-3.5" />
+          Configure
+        </Button>
+      </DialogTrigger>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label className="settings-field-label" htmlFor={`${title}-provider`}>
-                  Provider
-                </Label>
-                <Select
-                  value={currentProvider?.id ?? providers[0]?.id}
-                  onValueChange={(value) => onProviderChange(value as PROVIDER_ID)}
-                  disabled={!showLiveSave}
-                >
-                  <SelectTrigger id={`${title}-provider`} className="settings-input">
-                    <SelectValue placeholder="Choose provider" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {providers.map((provider) => (
-                      <SelectItem key={provider.id} value={provider.id}>
-                        {provider.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-xl tracking-[-0.02em]">{stageLabel}</DialogTitle>
+          <DialogDescription>{stageDescription}</DialogDescription>
+        </DialogHeader>
 
-              <div className="space-y-2">
-                <Label className="settings-field-label" htmlFor={`${title}-model`}>
-                  Model id
-                </Label>
-                <Input
-                  id={`${title}-model`}
-                  value={modelValue}
-                  onChange={(event) => onModelChange(event.target.value)}
-                  className="settings-input"
-                  disabled={!showLiveSave}
-                  placeholder={currentProvider?.defaultModelId}
-                />
-              </div>
-            </div>
-
-            {showLiveSave && onCustomBaseUrlChange && typeof customBaseUrl === 'string' ? (
-              <div className="space-y-2">
-                <Label className="settings-field-label" htmlFor={`${title}-base-url`}>
-                  Base URL
-                </Label>
-                <Input
-                  id={`${title}-base-url`}
-                  value={customBaseUrl}
-                  onChange={(event) => onCustomBaseUrlChange(event.target.value)}
-                  className="settings-input"
-                  placeholder={currentProvider?.defaultBaseUrl}
-                />
-              </div>
-            ) : null}
-
-            <div className="space-y-2">
-              <Label className="settings-field-label" htmlFor={`${title}-api-key`}>
-                {apiKeyLabel}
-              </Label>
-              <Input
-                id={`${title}-api-key`}
-                type="password"
-                value={apiKeyValue}
-                onChange={
-                  onApiKeyChange ? (event) => onApiKeyChange(event.target.value) : undefined
-                }
-                placeholder={apiKeyPlaceholder}
-                className="settings-input"
-                disabled={!showLiveSave}
-              />
-            </div>
-
-            <div>
-              <Button
-                className="rounded-2xl px-6 text-base"
-                onClick={showLiveSave ? () => void onSave?.() : undefined}
-                disabled={!showLiveSave || isSaving}
-              >
-                {isSaving ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {saveLabel}
-              </Button>
-            </div>
+        <div className="space-y-4 pt-2">
+          <div className="space-y-2">
+            <Label className="settings-field-label" htmlFor={`${stageLabel}-provider`}>
+              Provider
+            </Label>
+            <Select
+              value={settings.providerId}
+              onValueChange={(value) => onProviderChange(value as PROVIDER_ID)}
+            >
+              <SelectTrigger id={`${stageLabel}-provider`} className="settings-input">
+                <SelectValue placeholder="Choose provider" />
+              </SelectTrigger>
+              <SelectContent>
+                {providers.map((provider) => (
+                  <SelectItem key={provider.id} value={provider.id}>
+                    {provider.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
-          <SetupSummary providerLabel={providerLabel} modelValue={modelValue} />
+          <div className="space-y-2">
+            <Label className="settings-field-label" htmlFor={`${stageLabel}-model`}>
+              Model id
+            </Label>
+            <Input
+              id={`${stageLabel}-model`}
+              value={settings.modelId}
+              onChange={(e) => onModelChange(e.target.value)}
+              className="settings-input"
+              placeholder={currentProvider?.defaultModelId}
+            />
+          </div>
+
+          {currentProvider?.supportsCustomBaseUrl ? (
+            <div className="space-y-2">
+              <Label className="settings-field-label" htmlFor={`${stageLabel}-base-url`}>
+                Base URL
+              </Label>
+              <Input
+                id={`${stageLabel}-base-url`}
+                value={settings.baseUrl ?? ''}
+                onChange={(e) => onBaseUrlChange(e.target.value)}
+                className="settings-input"
+                placeholder={currentProvider.defaultBaseUrl}
+              />
+            </div>
+          ) : null}
+
+          <div className="space-y-2">
+            <Label className="settings-field-label" htmlFor={`${stageLabel}-api-key`}>
+              {currentProvider?.apiKeyLabel ?? 'API key'}
+              <span className="ml-1.5 text-xs font-normal text-muted-foreground/70">
+                (optional)
+              </span>
+            </Label>
+            <Input
+              id={`${stageLabel}-api-key`}
+              type="password"
+              value={settings.apiKey}
+              onChange={(e) => onApiKeyChange(e.target.value)}
+              placeholder={currentProvider?.apiKeyPlaceholder ?? 'API key'}
+              className="settings-input"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end pt-2">
+          <Button
+            className="rounded-2xl px-6 text-base"
+            onClick={() => void handleSave()}
+            disabled={isSaving}
+          >
+            {isSaving ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+            Save
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// --- Stage Card ---
+
+type StageCardProps<PROVIDER_ID extends string> = {
+  icon: React.ReactNode
+  label: string
+  description: string
+  stageTag: string
+  settings: { providerId: PROVIDER_ID; modelId: string; apiKey: string; baseUrl?: string }
+  providers: Array<ProviderOption<PROVIDER_ID>>
+  isSaving: boolean
+  onProviderChange: (providerId: PROVIDER_ID) => void
+  onModelChange: (modelId: string) => void
+  onApiKeyChange: (value: string) => void
+  onBaseUrlChange: (value: string) => void
+  onSave: () => Promise<void>
+}
+
+function StageCard<PROVIDER_ID extends string>({
+  icon,
+  label,
+  description,
+  stageTag,
+  settings,
+  providers,
+  isSaving,
+  onProviderChange,
+  onModelChange,
+  onApiKeyChange,
+  onBaseUrlChange,
+  onSave
+}: StageCardProps<PROVIDER_ID>): React.JSX.Element {
+  const currentProvider =
+    providers.find((p) => p.id === settings.providerId) ?? providers[0] ?? null
+
+  return (
+    <Card className="rounded-[1.75rem] border-border/70 bg-[#fffdf9] shadow-[0_8px_24px_rgba(55,78,75,0.05)] transition-shadow hover:shadow-[0_12px_32px_rgba(55,78,75,0.08)]">
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#d9efe8] text-primary">
+              {icon}
+            </div>
+            <div className="min-w-0 space-y-1">
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-semibold leading-tight tracking-[-0.02em] text-foreground">
+                  {label}
+                </h3>
+                <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[0.65rem] font-medium uppercase tracking-[0.12em] text-primary">
+                  {stageTag}
+                </span>
+              </div>
+              <p className="text-sm leading-5 text-muted-foreground">{description}</p>
+            </div>
+          </div>
+        </div>
+
+        <Separator className="my-4" />
+
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0 space-y-1 text-sm">
+            <div className="flex items-center gap-1.5 text-foreground/80">
+              <KeyRound className="size-3 text-primary/60" />
+              <span className="truncate font-medium">{currentProvider?.label ?? 'Unknown'}</span>
+            </div>
+            <p className="truncate text-muted-foreground">{settings.modelId}</p>
+          </div>
+
+          <StageConfigDialog
+            stageLabel={label}
+            stageDescription={description}
+            settings={settings}
+            providers={providers}
+            isSaving={isSaving}
+            onProviderChange={onProviderChange}
+            onModelChange={onModelChange}
+            onApiKeyChange={onApiKeyChange}
+            onBaseUrlChange={onBaseUrlChange}
+            onSave={onSave}
+          />
         </div>
       </CardContent>
     </Card>
   )
 }
+
+// --- Settings Screen ---
 
 export function SettingsScreen({
   chatProviders,
@@ -254,6 +327,14 @@ export function SettingsScreen({
   onChatModelChange,
   onChatApiKeyChange,
   onChatBaseUrlChange,
+  onStage1ProviderChange,
+  onStage1ModelChange,
+  onStage1ApiKeyChange,
+  onStage1BaseUrlChange,
+  onStage3ProviderChange,
+  onStage3ModelChange,
+  onStage3ApiKeyChange,
+  onStage3BaseUrlChange,
   onEmbeddingProviderChange,
   onEmbeddingModelChange,
   onEmbeddingApiKeyChange,
@@ -265,10 +346,6 @@ export function SettingsScreen({
   onSave
 }: SettingsScreenProps): React.JSX.Element {
   const [displayName, setDisplayName] = useState('Julian Thorne')
-  const activeChatProvider =
-    chatProviders.find((provider) => provider.id === draft?.chat.providerId) ?? null
-  const activeEmbeddingProvider =
-    embeddingProviders.find((provider) => provider.id === draft?.embeddings.providerId) ?? null
 
   return (
     <div className="h-full min-h-0 overflow-hidden">
@@ -293,7 +370,7 @@ export function SettingsScreen({
             </div>
           ) : null}
 
-          {isLoading || !draft || !activeChatProvider || !activeEmbeddingProvider ? (
+          {isLoading || !draft ? (
             <div className="flex min-h-48 items-center justify-center rounded-[2rem] border border-border/70 bg-[#fffdf9] text-muted-foreground">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
               Loading settings
@@ -327,33 +404,75 @@ export function SettingsScreen({
               <section className="space-y-4">
                 <SectionHeading
                   icon={<Bot className="size-5" />}
-                  title="AI Provider & Model Setup"
+                  title="AI Pipeline Configuration"
                 />
 
-                <SetupCard
-                  title="Provider and model setup"
-                  description="Choose the active provider, set the model id, and store the current provider key in app settings."
-                  providerLabel={activeChatProvider.label}
-                  modelValue={draft.chat.modelId}
-                  apiKeyValue={draft.chat.apiKey}
-                  apiKeyLabel={activeChatProvider.apiKeyLabel}
-                  apiKeyPlaceholder={activeChatProvider.apiKeyPlaceholder}
-                  isSaving={isSaving}
-                  currentProvider={activeChatProvider}
-                  providers={chatProviders}
-                  onProviderChange={onChatProviderChange}
-                  onModelChange={onChatModelChange}
-                  onApiKeyChange={onChatApiKeyChange}
-                  saveLabel="Save Configuration"
-                  onSave={onSave}
-                  showLiveSave
-                  customBaseUrl={
-                    activeChatProvider.supportsCustomBaseUrl ? draft.chat.baseUrl : undefined
-                  }
-                  onCustomBaseUrlChange={
-                    activeChatProvider.supportsCustomBaseUrl ? onChatBaseUrlChange : undefined
-                  }
-                />
+                <p className="max-w-3xl text-base leading-7 text-muted-foreground">
+                  Each stage of the processing pipeline can use a different provider and model.
+                  Configure them independently to balance cost, speed, and quality.
+                </p>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <StageCard
+                    icon={<Zap className="size-5" />}
+                    label="Stage 1: Parser"
+                    description="Extracts tone, intent, and risk markers from user messages."
+                    stageTag="Parse"
+                    settings={draft.stage1}
+                    providers={chatProviders}
+                    isSaving={isSaving}
+                    onProviderChange={onStage1ProviderChange}
+                    onModelChange={onStage1ModelChange}
+                    onApiKeyChange={onStage1ApiKeyChange}
+                    onBaseUrlChange={onStage1BaseUrlChange}
+                    onSave={onSave}
+                  />
+
+                  <StageCard
+                    icon={<Brain className="size-5" />}
+                    label="Stage 3: Reasoning"
+                    description="Decides the response strategy before generation."
+                    stageTag="Reason"
+                    settings={draft.stage3}
+                    providers={chatProviders}
+                    isSaving={isSaving}
+                    onProviderChange={onStage3ProviderChange}
+                    onModelChange={onStage3ModelChange}
+                    onApiKeyChange={onStage3ApiKeyChange}
+                    onBaseUrlChange={onStage3BaseUrlChange}
+                    onSave={onSave}
+                  />
+
+                  <StageCard
+                    icon={<Bot className="size-5" />}
+                    label="Stage 5: Chat"
+                    description="Streams the final assistant reply to the user."
+                    stageTag="Generate"
+                    settings={draft.chat}
+                    providers={chatProviders}
+                    isSaving={isSaving}
+                    onProviderChange={onChatProviderChange}
+                    onModelChange={onChatModelChange}
+                    onApiKeyChange={onChatApiKeyChange}
+                    onBaseUrlChange={onChatBaseUrlChange}
+                    onSave={onSave}
+                  />
+
+                  <StageCard
+                    icon={<ScanSearch className="size-5" />}
+                    label="Embeddings"
+                    description="Vector embedding model for memory retrieval."
+                    stageTag="Embed"
+                    settings={draft.embeddings}
+                    providers={embeddingProviders}
+                    isSaving={isSaving}
+                    onProviderChange={onEmbeddingProviderChange}
+                    onModelChange={onEmbeddingModelChange}
+                    onApiKeyChange={onEmbeddingApiKeyChange}
+                    onBaseUrlChange={onEmbeddingBaseUrlChange}
+                    onSave={onSave}
+                  />
+                </div>
               </section>
 
               <section className="space-y-4">
@@ -367,8 +486,8 @@ export function SettingsScreen({
                           Show activity in chat
                         </h3>
                         <p className="max-w-2xl text-base leading-7 text-muted-foreground">
-                          Display compact status updates for parsing, memory retrieval, generation,
-                          and tool-like background work while a reply is being created.
+                          Display compact status updates for parsing, reasoning, memory retrieval,
+                          generation, and tool-like background work while a reply is being created.
                         </p>
                       </div>
 
@@ -486,42 +605,6 @@ export function SettingsScreen({
                     </div>
                   </CardContent>
                 </Card>
-              </section>
-
-              <section className="space-y-4">
-                <SectionHeading
-                  icon={<ScanSearch className="size-5" />}
-                  title="Vector Embedding Model Setup"
-                />
-
-                <SetupCard
-                  title="Vector Embedding Model Setup"
-                  description="Configure the separate embedding provider used for retrieval and memory write-back."
-                  providerLabel={activeEmbeddingProvider.label}
-                  modelValue={draft.embeddings.modelId}
-                  apiKeyValue={draft.embeddings.apiKey}
-                  apiKeyLabel={activeEmbeddingProvider.apiKeyLabel}
-                  apiKeyPlaceholder={activeEmbeddingProvider.apiKeyPlaceholder}
-                  isSaving={isSaving}
-                  currentProvider={activeEmbeddingProvider}
-                  providers={embeddingProviders}
-                  onProviderChange={onEmbeddingProviderChange}
-                  onModelChange={onEmbeddingModelChange}
-                  onApiKeyChange={onEmbeddingApiKeyChange}
-                  saveLabel="Save Configuration"
-                  onSave={onSave}
-                  showLiveSave
-                  customBaseUrl={
-                    activeEmbeddingProvider.supportsCustomBaseUrl
-                      ? draft.embeddings.baseUrl
-                      : undefined
-                  }
-                  onCustomBaseUrlChange={
-                    activeEmbeddingProvider.supportsCustomBaseUrl
-                      ? onEmbeddingBaseUrlChange
-                      : undefined
-                  }
-                />
               </section>
 
               <section className="space-y-4">

@@ -1,29 +1,10 @@
 import type {
   AgentActivitySettings,
   AppSettings,
-  ChatProviderId,
   ChatSettings,
   EmbeddingSettings
 } from '../../shared/app-settings'
 import { defaultAppSettings, getChatProviderOption, getEmbeddingProviderOption } from './catalog'
-
-export interface LegacyAppSettings {
-  activeProviderId?: ChatProviderId
-  modelId?: string
-  customBaseUrl?: string
-  providerApiKeys?: Partial<Record<ChatProviderId, string>>
-}
-
-function isLegacyAppSettings(settings: unknown): settings is LegacyAppSettings {
-  return (
-    typeof settings === 'object' &&
-    settings !== null &&
-    ('activeProviderId' in settings ||
-      'modelId' in settings ||
-      'customBaseUrl' in settings ||
-      'providerApiKeys' in settings)
-  )
-}
 
 function normalizeChatSettings(settings?: Partial<ChatSettings>): ChatSettings {
   const providerId = settings?.providerId ?? defaultAppSettings.chat.providerId
@@ -76,31 +57,11 @@ function normalizeAgentActivitySettings(
   }
 }
 
-function normalizeLegacyAppSettings(settings: LegacyAppSettings): AppSettings {
-  const providerId = settings.activeProviderId ?? defaultAppSettings.chat.providerId
-  const provider = getChatProviderOption(providerId)
-
-  return {
-    chat: normalizeChatSettings({
-      providerId,
-      modelId: settings.modelId?.trim() || provider.defaultModelId,
-      apiKey: settings.providerApiKeys?.[providerId] ?? '',
-      baseUrl: settings.customBaseUrl
-    }),
-    embeddings: normalizeEmbeddingSettings(defaultAppSettings.embeddings),
-    agentActivity: normalizeAgentActivitySettings(defaultAppSettings.agentActivity)
-  }
-}
-
-export function normalizeAppSettings(
-  settings?: Partial<AppSettings> | LegacyAppSettings
-): AppSettings {
-  if (settings && isLegacyAppSettings(settings)) {
-    return normalizeLegacyAppSettings(settings)
-  }
-
+export function normalizeAppSettings(settings?: Partial<AppSettings>): AppSettings {
   return {
     chat: normalizeChatSettings(settings?.chat),
+    stage1: normalizeChatSettings(settings?.stage1),
+    stage3: normalizeChatSettings(settings?.stage3),
     embeddings: normalizeEmbeddingSettings(settings?.embeddings),
     agentActivity: normalizeAgentActivitySettings(settings?.agentActivity)
   }

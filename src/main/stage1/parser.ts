@@ -1,7 +1,7 @@
 import { generateText } from 'ai'
 import type { AppSettings } from '../../shared/app-settings'
 import type { MessageRecord } from '../../shared/session-chat'
-import { ChatProviderRegistryBuilder } from '../ai/provider-registry'
+import { Stage1ProviderRegistryBuilder } from '../ai/provider-registry'
 import type { PersistedSessionSummary } from '../memory/repository'
 import { buildStage1Prompt, stage1SystemPrompt } from './prompts'
 import type {
@@ -512,7 +512,7 @@ export async function runStage1Parser(options: {
   })
 
   try {
-    const { model } = new ChatProviderRegistryBuilder(options.settings).build()
+    const { model } = new Stage1ProviderRegistryBuilder(options.settings).build()
     const text = await generateStage1Text({
       model,
       system: stage1SystemPrompt,

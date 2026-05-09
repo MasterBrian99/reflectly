@@ -5,8 +5,9 @@ import type { EmbeddingModel, LanguageModel } from 'ai'
 import type {
   AppSettings,
   ChatProviderOption,
+  ChatSettings,
   EmbeddingProviderOption,
-  ProviderSettings
+  EmbeddingSettings
 } from '../../shared/app-settings'
 import { SessionChatAppError } from '../session-chat/error'
 import { getChatProviderOption, getEmbeddingProviderOption } from '../settings/catalog'
@@ -22,21 +23,11 @@ function getProviderBaseUrl(
   return baseUrl?.trim() || provider.defaultBaseUrl
 }
 
-function assertProviderConfig(
-  settings: ProviderSettings<string>,
+function assertProviderBaseUrl(
+  settings: ChatSettings | EmbeddingSettings,
   provider: ChatProviderOption | EmbeddingProviderOption,
-  providerLabel: string,
-  options?: {
-    allowEmptyApiKey?: boolean
-  }
+  providerLabel: string
 ): void {
-  if (!options?.allowEmptyApiKey && !settings.apiKey.trim()) {
-    throw new SessionChatAppError(
-      'MODEL_CONFIG_MISSING',
-      `Add a ${provider.apiKeyLabel.toLowerCase()} in settings before using ${providerLabel}.`
-    )
-  }
-
   if (provider.supportsCustomBaseUrl && !getProviderBaseUrl(provider, settings.baseUrl)) {
     throw new SessionChatAppError(
       'MODEL_CONFIG_MISSING',
@@ -46,86 +37,109 @@ function assertProviderConfig(
 }
 
 function buildChatModel(
-  settings: AppSettings,
+  chatSettings: ChatSettings,
   provider: ChatProviderOption,
   modelId: string
 ): LanguageModel {
+  const apiKey = chatSettings.apiKey.trim() || undefined
+
   switch (provider.id) {
     case 'openai':
-      return createOpenAI({
-        apiKey: settings.chat.apiKey.trim()
-      }).languageModel(modelId)
+      return createOpenAI({ apiKey }).languageModel(modelId)
     case 'anthropic':
-      return createAnthropic({
-        apiKey: settings.chat.apiKey.trim()
-      }).languageModel(modelId)
+      return createAnthropic({ apiKey }).languageModel(modelId)
     case 'openrouter':
       return createOpenAICompatible({
         name: 'openrouter',
-        apiKey: settings.chat.apiKey.trim(),
-        baseURL:
-          getProviderBaseUrl(provider, settings.chat.baseUrl) ?? provider.defaultBaseUrl ?? ''
+        apiKey,
+        baseURL: getProviderBaseUrl(provider, chatSettings.baseUrl) ?? provider.defaultBaseUrl ?? ''
       }).languageModel(modelId)
     case 'custom-openai-compatible':
       return createOpenAICompatible({
         name: 'custom-openai-compatible',
-        apiKey: settings.chat.apiKey.trim(),
-
-        baseURL:
-          getProviderBaseUrl(provider, settings.chat.baseUrl) ?? provider.defaultBaseUrl ?? ''
+        apiKey,
+        baseURL: getProviderBaseUrl(provider, chatSettings.baseUrl) ?? provider.defaultBaseUrl ?? ''
       }).languageModel(modelId)
   }
 }
 
 function buildEmbeddingModel(
-  settings: AppSettings,
+  embeddingSettings: EmbeddingSettings,
   provider: EmbeddingProviderOption,
   modelId: string
 ): EmbeddingModel {
+  const apiKey = embeddingSettings.apiKey.trim() || undefined
+
   switch (provider.id) {
     case 'openai':
-      return createOpenAI({
-        apiKey: settings.embeddings.apiKey.trim()
-      }).embeddingModel(modelId)
+      return createOpenAI({ apiKey }).embeddingModel(modelId)
     case 'openrouter':
       return createOpenAICompatible({
         name: 'openrouter',
-        apiKey: settings.embeddings.apiKey.trim(),
+        apiKey,
         baseURL:
-          getProviderBaseUrl(provider, settings.embeddings.baseUrl) ?? provider.defaultBaseUrl ?? ''
+          getProviderBaseUrl(provider, embeddingSettings.baseUrl) ?? provider.defaultBaseUrl ?? ''
       }).embeddingModel(modelId)
     case 'custom-openai-compatible':
       return createOpenAICompatible({
         name: 'custom-openai-compatible',
-        apiKey: settings.embeddings.apiKey.trim() || undefined,
+        apiKey,
         baseURL:
-          getProviderBaseUrl(provider, settings.embeddings.baseUrl) ?? provider.defaultBaseUrl ?? ''
+          getProviderBaseUrl(provider, embeddingSettings.baseUrl) ?? provider.defaultBaseUrl ?? ''
       }).embeddingModel(modelId)
+  }
+}
+
+function buildChatProvider(
+  chatSettings: ChatSettings,
+  label: string
+): { model: LanguageModel; provider: ChatProviderOption; modelId: string } {
+  const provider = getChatProviderOption(chatSettings.providerId)
+
+  assertProviderBaseUrl(chatSettings, provider, label)
+
+  const modelId = chatSettings.modelId.trim() || provider.defaultModelId
+
+  return {
+    provider,
+    modelId,
+    model: buildChatModel(chatSettings, provider, modelId)
   }
 }
 
 export class ChatProviderRegistryBuilder {
   private readonly settings: AppSettings
-  private readonly activeProvider: ChatProviderOption
 
   constructor(settings: AppSettings) {
     this.settings = settings
-    this.activeProvider = getChatProviderOption(settings.chat.providerId)
   }
 
-  build(): {
-    model: LanguageModel
-    provider: ChatProviderOption
-    modelId: string
-  } {
-    assertProviderConfig(this.settings.chat, this.activeProvider, 'chat')
-    const modelId = this.settings.chat.modelId.trim() || this.activeProvider.defaultModelId
+  build(): { model: LanguageModel; provider: ChatProviderOption; modelId: string } {
+    return buildChatProvider(this.settings.chat, 'chat')
+  }
+}
 
-    return {
-      provider: this.activeProvider,
-      modelId,
-      model: buildChatModel(this.settings, this.activeProvider, modelId)
-    }
+export class Stage1ProviderRegistryBuilder {
+  private readonly settings: AppSettings
+
+  constructor(settings: AppSettings) {
+    this.settings = settings
+  }
+
+  build(): { model: LanguageModel; provider: ChatProviderOption; modelId: string } {
+    return buildChatProvider(this.settings.stage1, 'stage1')
+  }
+}
+
+export class Stage3ProviderRegistryBuilder {
+  private readonly settings: AppSettings
+
+  constructor(settings: AppSettings) {
+    this.settings = settings
+  }
+
+  build(): { model: LanguageModel; provider: ChatProviderOption; modelId: string } {
+    return buildChatProvider(this.settings.stage3, 'stage3')
   }
 }
 
@@ -139,13 +153,6 @@ export class EmbeddingProviderRegistryBuilder {
   }
 
   isConfigured(): boolean {
-    if (
-      this.activeProvider.id !== 'custom-openai-compatible' &&
-      !this.settings.embeddings.apiKey.trim()
-    ) {
-      return false
-    }
-
     if (this.activeProvider.supportsCustomBaseUrl) {
       return Boolean(getProviderBaseUrl(this.activeProvider, this.settings.embeddings.baseUrl))
     }
@@ -158,15 +165,13 @@ export class EmbeddingProviderRegistryBuilder {
     provider: EmbeddingProviderOption
     modelId: string
   } {
-    assertProviderConfig(this.settings.embeddings, this.activeProvider, 'embeddings', {
-      allowEmptyApiKey: this.activeProvider.id === 'custom-openai-compatible'
-    })
+    assertProviderBaseUrl(this.settings.embeddings, this.activeProvider, 'embeddings')
     const modelId = this.settings.embeddings.modelId.trim() || this.activeProvider.defaultModelId
 
     return {
       provider: this.activeProvider,
       modelId,
-      model: buildEmbeddingModel(this.settings, this.activeProvider, modelId)
+      model: buildEmbeddingModel(this.settings.embeddings, this.activeProvider, modelId)
     }
   }
 }

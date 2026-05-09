@@ -3,6 +3,7 @@ import type { AppSettings } from '../../shared/app-settings'
 import type { ChatStreamEvent, MessageRecord } from '../../shared/session-chat'
 import type { RetrievedMemoryItem } from '../memory/retrieval'
 import type { Stage1ParseOutput } from '../stage1/types'
+import type { Stage3ReasoningOutput } from '../stage3/types'
 import { ChatProviderRegistryBuilder } from '../ai/provider-registry'
 import { SessionChatAppError } from './error'
 
@@ -22,6 +23,7 @@ function buildSystemPrompt(options: {
   currentSessionSummary?: string | null
   retrievedMemory?: RetrievedMemoryItem[]
   stage1Output?: Stage1ParseOutput
+  stage3Output?: Stage3ReasoningOutput
 }): string {
   const sections = [systemPrompt]
   const memoryLines: string[] = []
@@ -86,6 +88,36 @@ function buildSystemPrompt(options: {
     )
   }
 
+  if (options.stage3Output) {
+    const s3 = options.stage3Output
+    const avoidLines = s3.responsePlan.avoid.map((item) => `- ${item}`)
+    const safetyLines = s3.safetyNotes.notes.map((note) => `- ${note}`)
+
+    sections.push(
+      [
+        'Stage 3 response guidance:',
+        `- Support mode: ${s3.supportMode}`,
+        `- Depth level: ${s3.depthLevel}`,
+        `- Response goal: ${s3.responseGoal}`,
+        `- Emotional hypothesis: ${s3.emotionalHypothesis.summary} (confidence ${s3.emotionalHypothesis.confidence})`,
+        `- Memory use: ${s3.memoryUse.summary}${s3.memoryUse.caution ? ` (caution: ${s3.memoryUse.caution})` : ''}`,
+        `- Opening move: ${s3.responsePlan.openingMove}`,
+        `- Key points: ${s3.responsePlan.keyPoints.join('; ') || 'None.'}`,
+        s3.responsePlan.suggestedQuestion
+          ? `- Suggested question: ${s3.responsePlan.suggestedQuestion}`
+          : null,
+        avoidLines.length ? `- Avoid:\n${avoidLines.join('\n')}` : '- Avoid: Nothing specific.',
+        `- Safety notes: ${s3.safetyNotes.hasActiveRiskMarkers ? 'Active risk markers present.' : 'No active risk markers.'}`,
+        safetyLines.length ? safetyLines.join('\n') : null,
+        '',
+        'Use this as private planning guidance. Do not mention internal labels or stages.',
+        "If the guidance conflicts with safety rules or the user's actual message, prioritize safety and the user's message."
+      ]
+        .filter(Boolean)
+        .join('\n')
+    )
+  }
+
   return sections.join('\n\n')
 }
 
@@ -147,6 +179,7 @@ export async function streamAssistantReply(options: {
   currentSessionSummary?: string | null
   retrievedMemory?: RetrievedMemoryItem[]
   stage1Output?: Stage1ParseOutput
+  stage3Output?: Stage3ReasoningOutput
   requestId: string
   sessionId: string
   emit: (event: ChatStreamEvent) => void
@@ -158,7 +191,8 @@ export async function streamAssistantReply(options: {
     system: buildSystemPrompt({
       currentSessionSummary: options.currentSessionSummary,
       retrievedMemory: options.retrievedMemory,
-      stage1Output: options.stage1Output
+      stage1Output: options.stage1Output,
+      stage3Output: options.stage3Output
     }),
     messages: mapMessages(options.messages),
     providerOptions: buildReasoningProviderOptions(options.settings),

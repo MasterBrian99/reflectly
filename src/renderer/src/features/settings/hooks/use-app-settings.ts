@@ -17,6 +17,14 @@ export function useAppSettings(): {
   setChatModelId: (modelId: string) => void
   setChatApiKey: (value: string) => void
   setChatBaseUrl: (value: string) => void
+  setStage1ProviderId: (providerId: ChatProviderOption['id']) => void
+  setStage1ModelId: (modelId: string) => void
+  setStage1ApiKey: (value: string) => void
+  setStage1BaseUrl: (value: string) => void
+  setStage3ProviderId: (providerId: ChatProviderOption['id']) => void
+  setStage3ModelId: (modelId: string) => void
+  setStage3ApiKey: (value: string) => void
+  setStage3BaseUrl: (value: string) => void
   setEmbeddingProviderId: (providerId: EmbeddingProviderOption['id']) => void
   setEmbeddingModelId: (modelId: string) => void
   setEmbeddingApiKey: (value: string) => void
@@ -54,6 +62,8 @@ export function useAppSettings(): {
     })
   }, [])
 
+  // --- Chat (Stage 5) ---
+
   function setChatProviderId(providerId: ChatProviderOption['id']): void {
     if (!draft || !snapshot) {
       return
@@ -77,13 +87,7 @@ export function useAppSettings(): {
       return
     }
 
-    setDraft({
-      ...draft,
-      chat: {
-        ...draft.chat,
-        modelId
-      }
-    })
+    setDraft({ ...draft, chat: { ...draft.chat, modelId } })
   }
 
   function setChatApiKey(value: string): void {
@@ -91,13 +95,7 @@ export function useAppSettings(): {
       return
     }
 
-    setDraft({
-      ...draft,
-      chat: {
-        ...draft.chat,
-        apiKey: value
-      }
-    })
+    setDraft({ ...draft, chat: { ...draft.chat, apiKey: value } })
   }
 
   function setChatBaseUrl(value: string): void {
@@ -105,14 +103,98 @@ export function useAppSettings(): {
       return
     }
 
+    setDraft({ ...draft, chat: { ...draft.chat, baseUrl: value } })
+  }
+
+  // --- Stage 1 ---
+
+  function setStage1ProviderId(providerId: ChatProviderOption['id']): void {
+    if (!draft || !snapshot) {
+      return
+    }
+
+    const provider = snapshot.chatProviders.find((item) => item.id === providerId)
+
     setDraft({
       ...draft,
-      chat: {
-        ...draft.chat,
-        baseUrl: value
+      stage1: {
+        ...draft.stage1,
+        providerId,
+        modelId: provider?.defaultModelId ?? draft.stage1.modelId,
+        baseUrl: provider?.supportsCustomBaseUrl ? provider.defaultBaseUrl : undefined
       }
     })
   }
+
+  function setStage1ModelId(modelId: string): void {
+    if (!draft) {
+      return
+    }
+
+    setDraft({ ...draft, stage1: { ...draft.stage1, modelId } })
+  }
+
+  function setStage1ApiKey(value: string): void {
+    if (!draft) {
+      return
+    }
+
+    setDraft({ ...draft, stage1: { ...draft.stage1, apiKey: value } })
+  }
+
+  function setStage1BaseUrl(value: string): void {
+    if (!draft) {
+      return
+    }
+
+    setDraft({ ...draft, stage1: { ...draft.stage1, baseUrl: value } })
+  }
+
+  // --- Stage 3 ---
+
+  function setStage3ProviderId(providerId: ChatProviderOption['id']): void {
+    if (!draft || !snapshot) {
+      return
+    }
+
+    const provider = snapshot.chatProviders.find((item) => item.id === providerId)
+
+    setDraft({
+      ...draft,
+      stage3: {
+        ...draft.stage3,
+        providerId,
+        modelId: provider?.defaultModelId ?? draft.stage3.modelId,
+        baseUrl: provider?.supportsCustomBaseUrl ? provider.defaultBaseUrl : undefined
+      }
+    })
+  }
+
+  function setStage3ModelId(modelId: string): void {
+    if (!draft) {
+      return
+    }
+
+    setDraft({ ...draft, stage3: { ...draft.stage3, modelId } })
+  }
+
+  function setStage3ApiKey(value: string): void {
+    if (!draft) {
+      return
+    }
+
+    setDraft({ ...draft, stage3: { ...draft.stage3, apiKey: value } })
+  }
+
+  function setStage3BaseUrl(value: string): void {
+    if (!draft) {
+      return
+    }
+
+    setDraft({ ...draft, stage3: { ...draft.stage3, baseUrl: value } })
+  }
+
+  // --- Embeddings ---
 
   function setEmbeddingProviderId(providerId: EmbeddingProviderOption['id']): void {
     if (!draft || !snapshot) {
@@ -137,13 +219,7 @@ export function useAppSettings(): {
       return
     }
 
-    setDraft({
-      ...draft,
-      embeddings: {
-        ...draft.embeddings,
-        modelId
-      }
-    })
+    setDraft({ ...draft, embeddings: { ...draft.embeddings, modelId } })
   }
 
   function setEmbeddingApiKey(value: string): void {
@@ -151,13 +227,7 @@ export function useAppSettings(): {
       return
     }
 
-    setDraft({
-      ...draft,
-      embeddings: {
-        ...draft.embeddings,
-        apiKey: value
-      }
-    })
+    setDraft({ ...draft, embeddings: { ...draft.embeddings, apiKey: value } })
   }
 
   function setEmbeddingBaseUrl(value: string): void {
@@ -165,27 +235,17 @@ export function useAppSettings(): {
       return
     }
 
-    setDraft({
-      ...draft,
-      embeddings: {
-        ...draft.embeddings,
-        baseUrl: value
-      }
-    })
+    setDraft({ ...draft, embeddings: { ...draft.embeddings, baseUrl: value } })
   }
+
+  // --- Agent Activity ---
 
   function setAgentActivityShowInChat(value: boolean): void {
     if (!draft) {
       return
     }
 
-    setDraft({
-      ...draft,
-      agentActivity: {
-        ...draft.agentActivity,
-        showInChat: value
-      }
-    })
+    setDraft({ ...draft, agentActivity: { ...draft.agentActivity, showInChat: value } })
   }
 
   function setAgentActivityShowModelReasoning(value: boolean): void {
@@ -193,13 +253,7 @@ export function useAppSettings(): {
       return
     }
 
-    setDraft({
-      ...draft,
-      agentActivity: {
-        ...draft.agentActivity,
-        showModelReasoning: value
-      }
-    })
+    setDraft({ ...draft, agentActivity: { ...draft.agentActivity, showModelReasoning: value } })
   }
 
   function setAgentActivityReasoningEffort(
@@ -209,13 +263,7 @@ export function useAppSettings(): {
       return
     }
 
-    setDraft({
-      ...draft,
-      agentActivity: {
-        ...draft.agentActivity,
-        reasoningEffort: value
-      }
-    })
+    setDraft({ ...draft, agentActivity: { ...draft.agentActivity, reasoningEffort: value } })
   }
 
   function setAgentActivityReasoningSummary(
@@ -225,13 +273,7 @@ export function useAppSettings(): {
       return
     }
 
-    setDraft({
-      ...draft,
-      agentActivity: {
-        ...draft.agentActivity,
-        reasoningSummary: value
-      }
-    })
+    setDraft({ ...draft, agentActivity: { ...draft.agentActivity, reasoningSummary: value } })
   }
 
   async function save(): Promise<void> {
@@ -263,6 +305,14 @@ export function useAppSettings(): {
     setChatModelId,
     setChatApiKey,
     setChatBaseUrl,
+    setStage1ProviderId,
+    setStage1ModelId,
+    setStage1ApiKey,
+    setStage1BaseUrl,
+    setStage3ProviderId,
+    setStage3ModelId,
+    setStage3ApiKey,
+    setStage3BaseUrl,
     setEmbeddingProviderId,
     setEmbeddingModelId,
     setEmbeddingApiKey,

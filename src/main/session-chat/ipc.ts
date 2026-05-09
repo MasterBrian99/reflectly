@@ -24,6 +24,11 @@ import {
   resolveLatestPendingClarificationRequest,
   upsertStage1ParseOutput
 } from '../stage1/repository'
+import { runStage3Reasoner } from '../stage3/reasoner'
+import {
+  upsertStage3ReasoningOutput,
+  attachAssistantMessageId as attachStage3AssistantMessageId
+} from '../stage3/repository'
 import { openWorkspace } from '../workspace/bootstrap'
 import { readWorkspacePath } from '../workspace/store'
 import { SessionChatAppError, toSessionChatError } from './error'
@@ -394,6 +399,49 @@ export function registerSessionChatIpc(): void {
                   : 'No relevant memory was found.'
               })
               emitActivity({
+                id: 'stage3-reasoning',
+                kind: 'reasoning',
+                status: 'running',
+                label: 'Reasoning about response',
+                detail: 'Deciding the response strategy using structured reasoning.'
+              })
+              const stage3Output = await runStage3Reasoner({
+                settings,
+                userMessage: persistedUserState.userMessage,
+                contextMessages: persistedUserState.contextMessages,
+                stage1Output,
+                currentSessionSummary,
+                retrievedMemory
+              })
+
+              try {
+                upsertStage3ReasoningOutput(workspacePath, stage3Output)
+              } catch (error) {
+                console.error(
+                  'Stage 3 output persistence failed. Continuing with in-memory output.',
+                  error
+                )
+              }
+
+              emitActivity({
+                id: 'stage3-reasoning',
+                kind: 'reasoning',
+                status:
+                  stage3Output.supportMode === 'supportive' &&
+                  stage3Output.depthLevel === 'light' &&
+                  stage3Output.emotionalHypothesis.confidence === 0
+                    ? 'error'
+                    : 'complete',
+                label:
+                  stage3Output.emotionalHypothesis.confidence === 0
+                    ? 'Reasoning fallback used'
+                    : 'Reasoning ready',
+                detail:
+                  stage3Output.emotionalHypothesis.confidence === 0
+                    ? 'The response will continue with deterministic reasoning guidance.'
+                    : `Support mode: ${stage3Output.supportMode}, depth: ${stage3Output.depthLevel}.`
+              })
+              emitActivity({
                 id: 'assistant-generation',
                 kind: 'stage',
                 status: 'running',
@@ -406,6 +454,7 @@ export function registerSessionChatIpc(): void {
                 currentSessionSummary: currentSessionSummary?.summaryText ?? null,
                 retrievedMemory,
                 stage1Output,
+                stage3Output,
                 requestId,
                 sessionId: request.sessionId,
                 emit
@@ -429,6 +478,16 @@ export function registerSessionChatIpc(): void {
                   'Reflectly saved your message, but could not save the reply.',
                   true
                 )
+              }
+
+              try {
+                attachStage3AssistantMessageId(
+                  workspacePath,
+                  persistedUserState.userMessage.id,
+                  assistantState.assistantMessage.id
+                )
+              } catch (error) {
+                console.error('Stage 3 assistant_message_id attachment failed.', error)
               }
 
               try {

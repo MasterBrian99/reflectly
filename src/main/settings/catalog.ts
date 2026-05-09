@@ -111,6 +111,16 @@ export const defaultAppSettings: AppSettings = {
     modelId: 'openai/gpt-4.1-mini',
     apiKey: ''
   },
+  stage1: {
+    providerId: 'openrouter',
+    modelId: 'openai/gpt-4.1-mini',
+    apiKey: ''
+  },
+  stage3: {
+    providerId: 'openrouter',
+    modelId: 'openai/gpt-4.1-mini',
+    apiKey: ''
+  },
   embeddings: {
     providerId: 'openai',
     modelId: 'text-embedding-3-small',

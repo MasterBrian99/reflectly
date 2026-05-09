@@ -205,6 +205,32 @@ const migrations: MigrationDefinition[] = [
       CREATE INDEX IF NOT EXISTS idx_safety_events_session_created_at
       ON safety_events(session_id, created_at DESC, id DESC);
     `
+  },
+  {
+    name: '0010_stage3_reasoning_outputs',
+    sql: `
+      CREATE TABLE IF NOT EXISTS stage3_reasoning_outputs (
+        message_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        assistant_message_id TEXT,
+        schema_version INTEGER NOT NULL,
+        support_mode TEXT NOT NULL CHECK(support_mode IN ('reflective', 'practical', 'psychoeducation', 'grounding', 'values', 'problem_solving', 'supportive')),
+        depth_level TEXT NOT NULL CHECK(depth_level IN ('light', 'moderate', 'deep')),
+        response_goal TEXT NOT NULL,
+        emotional_hypothesis TEXT NOT NULL,
+        memory_use TEXT NOT NULL,
+        response_plan TEXT NOT NULL,
+        safety_notes TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY (assistant_message_id) REFERENCES messages(id) ON DELETE SET NULL
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS idx_stage3_reasoning_outputs_session_created_at
+      ON stage3_reasoning_outputs(session_id, created_at DESC, message_id DESC);
+    `
   }
 ]
 

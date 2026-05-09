@@ -18,6 +18,14 @@ export function WorkspaceSettingsRoute(): React.JSX.Element {
         onChatModelChange={appSettings.setChatModelId}
         onChatApiKeyChange={appSettings.setChatApiKey}
         onChatBaseUrlChange={appSettings.setChatBaseUrl}
+        onStage1ProviderChange={appSettings.setStage1ProviderId}
+        onStage1ModelChange={appSettings.setStage1ModelId}
+        onStage1ApiKeyChange={appSettings.setStage1ApiKey}
+        onStage1BaseUrlChange={appSettings.setStage1BaseUrl}
+        onStage3ProviderChange={appSettings.setStage3ProviderId}
+        onStage3ModelChange={appSettings.setStage3ModelId}
+        onStage3ApiKeyChange={appSettings.setStage3ApiKey}
+        onStage3BaseUrlChange={appSettings.setStage3BaseUrl}
         onEmbeddingProviderChange={appSettings.setEmbeddingProviderId}
         onEmbeddingModelChange={appSettings.setEmbeddingModelId}
         onEmbeddingApiKeyChange={appSettings.setEmbeddingApiKey}

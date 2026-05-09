@@ -30,6 +30,16 @@ test('MemoryRetrievalService falls back to transcript-only mode when embeddings 
         modelId: 'gpt-4.1-mini',
         apiKey: 'chat-key'
       },
+      stage1: {
+        providerId: 'openai',
+        modelId: 'gpt-4.1-mini',
+        apiKey: 'chat-key'
+      },
+      stage3: {
+        providerId: 'openai',
+        modelId: 'gpt-4.1-mini',
+        apiKey: 'chat-key'
+      },
       embeddings: {
         providerId: 'openai',
         modelId: 'text-embedding-3-small',
@@ -55,6 +65,16 @@ test('MemoryRetrievalService returns empty for blank query text', async () => {
     queryText: '   ',
     settings: {
       chat: {
+        providerId: 'openai',
+        modelId: 'gpt-4.1-mini',
+        apiKey: 'chat-key'
+      },
+      stage1: {
+        providerId: 'openai',
+        modelId: 'gpt-4.1-mini',
+        apiKey: 'chat-key'
+      },
+      stage3: {
         providerId: 'openai',
         modelId: 'gpt-4.1-mini',
         apiKey: 'chat-key'

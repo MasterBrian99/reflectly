@@ -40,6 +40,8 @@ export interface AgentActivitySettings {
 
 export interface AppSettings {
   chat: ChatSettings
+  stage1: ChatSettings
+  stage3: ChatSettings
   embeddings: EmbeddingSettings
   agentActivity: AgentActivitySettings
 }

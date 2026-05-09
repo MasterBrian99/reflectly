@@ -2,10 +2,10 @@ import { app } from 'electron'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AppSettings } from '../../shared/app-settings'
-import { normalizeAppSettings, type LegacyAppSettings } from './normalize'
+import { normalizeAppSettings } from './normalize'
 
 interface SettingsStoreState {
-  appSettings?: Partial<AppSettings> | LegacyAppSettings
+  appSettings?: Partial<AppSettings>
 }
 
 const storeFile = 'app-settings.json'
