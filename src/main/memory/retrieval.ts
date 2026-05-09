@@ -1,21 +1,25 @@
 import { embed } from 'ai'
 import type { AppSettings } from '../../shared/app-settings'
 import { EmbeddingProviderRegistryBuilder } from '../ai/provider-registry'
-import { listRetrievalCandidates, type RetrievalCandidate } from './repository'
+import { searchMemoryByVector, type VectorSearchResult } from './repository'
 
 export interface RetrievedMemoryItem {
   id: string
-  candidateType: RetrievalCandidate['candidateType']
+  candidateType: VectorSearchResult['candidateType']
   sessionId: string
   sessionTitle: string
   sourceMessageId: string
-  chunkKind: RetrievalCandidate['chunkKind']
+  chunkKind: VectorSearchResult['chunkKind']
   content: string
   similarity: number
   scopeLabel: 'current-session' | 'other-session'
   updatedAt: string
 }
 
+/**
+ * Computes cosine similarity between two equal-length vectors.
+ * Kept as a utility for tests and fallback scenarios.
+ */
 export function cosineSimilarity(left: number[], right: number[]): number {
   if (!left.length || left.length !== right.length) {
     return 0
@@ -41,53 +45,22 @@ export function cosineSimilarity(left: number[], right: number[]): number {
   return dotProduct / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude))
 }
 
-export function shapeRetrievedMemoryItems(options: {
+function mapSearchResultToMemoryItem(
+  result: VectorSearchResult,
   activeSessionId: string
-  candidates: RetrievalCandidate[]
-  queryVector: number[]
-  limit?: number
-}): RetrievedMemoryItem[] {
-  const limit = options.limit ?? 5
-
-  return options.candidates
-    .filter((candidate) => {
-      if (!candidate.embeddingVector?.length) {
-        return false
-      }
-
-      if (
-        candidate.candidateType === 'session_summary' &&
-        candidate.sessionId === options.activeSessionId
-      ) {
-        return false
-      }
-
-      return candidate.embeddingVector.length === options.queryVector.length
-    })
-    .map((candidate) => ({
-      id: candidate.id,
-      candidateType: candidate.candidateType,
-      sessionId: candidate.sessionId,
-      sessionTitle: candidate.sessionTitle,
-      sourceMessageId: candidate.sourceMessageId,
-      chunkKind: candidate.chunkKind,
-      content: candidate.content,
-      similarity: cosineSimilarity(options.queryVector, candidate.embeddingVector ?? []),
-      scopeLabel:
-        candidate.sessionId === options.activeSessionId
-          ? ('current-session' as const)
-          : ('other-session' as const),
-      updatedAt: candidate.updatedAt
-    }))
-    .filter((candidate) => candidate.similarity > 0)
-    .sort((left, right) => {
-      if (right.similarity !== left.similarity) {
-        return right.similarity - left.similarity
-      }
-
-      return right.updatedAt.localeCompare(left.updatedAt)
-    })
-    .slice(0, limit)
+): RetrievedMemoryItem {
+  return {
+    id: result.id,
+    candidateType: result.candidateType,
+    sessionId: result.sessionId,
+    sessionTitle: result.sessionTitle,
+    sourceMessageId: result.sourceMessageId,
+    chunkKind: result.chunkKind,
+    content: result.content,
+    similarity: Math.max(0, 1 - result.distance),
+    scopeLabel: result.sessionId === activeSessionId ? 'current-session' : 'other-session',
+    updatedAt: result.updatedAt
+  }
 }
 
 export class MemoryRetrievalService {
@@ -115,11 +88,14 @@ export class MemoryRetrievalService {
         maxRetries: 1
       })
 
-      return shapeRetrievedMemoryItems({
+      const results = searchMemoryByVector(options.workspacePath, {
         activeSessionId: options.activeSessionId,
-        candidates: listRetrievalCandidates(options.workspacePath),
-        queryVector: embedding
+        queryVector: embedding,
+        limit: 5,
+        embeddingDimension: embedding.length
       })
+
+      return results.map((r) => mapSearchResultToMemoryItem(r, options.activeSessionId))
     } catch (error) {
       console.error('Memory retrieval failed. Falling back to transcript-only generation.', error)
       return []

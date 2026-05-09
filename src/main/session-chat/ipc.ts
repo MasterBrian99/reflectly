@@ -225,7 +225,7 @@ export function registerSessionChatIpc(): void {
               const rawStage1Output = await runStage1Parser({
                 settings,
                 userMessage: persistedUserState.userMessage,
-                contextMessages: persistedUserState.contextMessages,
+                contextMessages: persistedUserState.contextMessages.slice(-6),
                 currentSessionSummary
               })
               const stage1Output = applyClarificationRules(rawStage1Output, {

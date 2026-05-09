@@ -48,7 +48,8 @@ async function createWorkspaceFixture(): Promise<{
       content TEXT NOT NULL,
       embedding_provider TEXT,
       embedding_model TEXT,
-      embedding_vector TEXT,
+      embedding_dimension INTEGER,
+      embedding_vector BLOB,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
@@ -61,7 +62,8 @@ async function createWorkspaceFixture(): Promise<{
       source_message_id TEXT NOT NULL,
       embedding_provider TEXT,
       embedding_model TEXT,
-      embedding_vector TEXT,
+      embedding_dimension INTEGER,
+      embedding_vector BLOB,
       turn_count_snapshot INTEGER,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
@@ -97,7 +99,7 @@ async function createWorkspaceFixture(): Promise<{
   }
 }
 
-test('memory repository persists chunks and rolling session summaries', async (t) => {
+test('memory repository persists chunks and rolling session summaries with BLOB vectors', async (t) => {
   const fixture = await createWorkspaceFixture()
   t.after(async () => fixture.cleanup())
 
@@ -135,5 +137,91 @@ test('memory repository persists chunks and rolling session summaries', async (t
     currentSummary?.summaryText,
     'The session focuses on stress recovery and steadier routines.'
   )
-  assert.deepEqual(currentSummary?.embeddingVector, [0.3, 0.2, 0.1])
+  assert.deepEqual(currentSummary?.embeddingDimension, 3)
+})
+
+test('memory repository stores BLOB vectors with correct byte length', async (t) => {
+  const fixture = await createWorkspaceFixture()
+  t.after(async () => fixture.cleanup())
+
+  const vector = [0.1, 0.2, 0.3, 0.4, 0.5]
+
+  insertMemoryChunk(fixture.workspacePath, {
+    sessionId: 'session-a',
+    sourceMessageId: 'message-a',
+    chunkKind: 'turn_summary',
+    content: 'Test BLOB vector storage.',
+    embeddingProvider: 'openai',
+    embeddingModel: 'text-embedding-3-small',
+    embeddingVector: vector
+  })
+
+  // Read raw row to verify BLOB storage
+  const database = openWorkspaceDatabase(fixture.workspacePath)
+
+  try {
+    const row = database
+      .prepare('SELECT embedding_vector, embedding_dimension FROM memory_chunks LIMIT 1')
+      .get() as { embedding_vector: Uint8Array | null; embedding_dimension: number | null }
+
+    assert.ok(row.embedding_vector instanceof Uint8Array, 'embedding_vector should be a Uint8Array')
+    assert.equal(row.embedding_vector.byteLength, vector.length * 4)
+    assert.equal(row.embedding_dimension, vector.length)
+  } finally {
+    database.close()
+  }
+})
+
+test('memory repository handles null embedding vectors gracefully', async (t) => {
+  const fixture = await createWorkspaceFixture()
+  t.after(async () => fixture.cleanup())
+
+  const insertedChunk = insertMemoryChunk(fixture.workspacePath, {
+    sessionId: 'session-a',
+    sourceMessageId: 'message-a',
+    chunkKind: 'turn_summary',
+    content: 'Text-only memory without embeddings.'
+  })
+
+  assert.equal(insertedChunk.sessionId, 'session-a')
+
+  const currentSummary = upsertSessionSummary(fixture.workspacePath, {
+    sessionId: 'session-a',
+    sourceMessageId: 'message-a',
+    summaryText: 'Text-only session summary.',
+    turnCountSnapshot: 1
+  })
+
+  assert.equal(currentSummary.embeddingDimension, null)
+  assert.equal(currentSummary.embeddingVector, null)
+})
+
+test('session summary round-trips BLOB embedding vectors correctly', async (t) => {
+  const fixture = await createWorkspaceFixture()
+  t.after(async () => fixture.cleanup())
+
+  const originalVector = [1.0, -0.5, 0.0, 3.14, -2.718]
+
+  upsertSessionSummary(fixture.workspacePath, {
+    sessionId: 'session-a',
+    sourceMessageId: 'message-a',
+    summaryText: 'Vector round-trip test.',
+    turnCountSnapshot: 1,
+    embeddingProvider: 'openai',
+    embeddingModel: 'text-embedding-3-small',
+    embeddingVector: originalVector
+  })
+
+  const summary = getSessionSummary(fixture.workspacePath, 'session-a')
+
+  assert.ok(summary !== null)
+  assert.ok(summary!.embeddingVector !== null)
+  assert.equal(summary!.embeddingVector!.length, originalVector.length)
+
+  for (let i = 0; i < originalVector.length; i += 1) {
+    assert.ok(
+      Math.abs(summary!.embeddingVector![i] - originalVector[i]) < 1e-6,
+      `Element ${i}: expected ~${originalVector[i]}, got ${summary!.embeddingVector![i]}`
+    )
+  }
 })

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { openWorkspaceDatabase } from '../workspace/database'
+import { serializeFloat32Vector, deserializeFloat32Vector } from './vector-utils'
 
 export type MemoryChunkKind = 'turn_summary'
 export type RetrievalCandidateType = 'memory_chunk' | 'session_summary'
@@ -13,6 +14,7 @@ export interface PersistedSessionSummary {
   updatedAt: string
   embeddingProvider: string | null
   embeddingModel: string | null
+  embeddingDimension: number | null
   embeddingVector: number[] | null
 }
 
@@ -26,8 +28,21 @@ export interface RetrievalCandidate {
   content: string
   embeddingProvider: string | null
   embeddingModel: string | null
-  embeddingVector: number[] | null
   updatedAt: string
+}
+
+export interface VectorSearchResult {
+  id: string
+  candidateType: RetrievalCandidateType
+  sessionId: string
+  sessionTitle: string
+  sourceMessageId: string
+  chunkKind: MemoryChunkKind | 'session_summary'
+  content: string
+  embeddingProvider: string | null
+  embeddingModel: string | null
+  updatedAt: string
+  distance: number
 }
 
 interface RetrievalCandidateRow {
@@ -40,8 +55,11 @@ interface RetrievalCandidateRow {
   content: string
   embedding_provider: string | null
   embedding_model: string | null
-  embedding_vector: string | null
   updated_at: string
+}
+
+interface VectorSearchRow extends RetrievalCandidateRow {
+  distance: number
 }
 
 interface SessionSummaryRow {
@@ -52,30 +70,8 @@ interface SessionSummaryRow {
   updated_at: string
   embedding_provider: string | null
   embedding_model: string | null
-  embedding_vector: string | null
-}
-
-function serializeEmbeddingVector(vector?: number[] | null): string | null {
-  return vector?.length ? JSON.stringify(vector) : null
-}
-
-function parseEmbeddingVector(raw: string | null): number[] | null {
-  if (!raw) {
-    return null
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as unknown
-
-    if (!Array.isArray(parsed)) {
-      return null
-    }
-
-    const vector = parsed.filter((value): value is number => Number.isFinite(value))
-    return vector.length === parsed.length && vector.length > 0 ? vector : null
-  } catch {
-    return null
-  }
+  embedding_dimension: number | null
+  embedding_vector: Uint8Array | null
 }
 
 function mapSessionSummary(row: SessionSummaryRow): PersistedSessionSummary {
@@ -87,7 +83,8 @@ function mapSessionSummary(row: SessionSummaryRow): PersistedSessionSummary {
     updatedAt: row.updated_at,
     embeddingProvider: row.embedding_provider,
     embeddingModel: row.embedding_model,
-    embeddingVector: parseEmbeddingVector(row.embedding_vector)
+    embeddingDimension: row.embedding_dimension === null ? null : Number(row.embedding_dimension),
+    embeddingVector: deserializeFloat32Vector(row.embedding_vector ?? null)
   }
 }
 
@@ -102,8 +99,23 @@ function mapRetrievalCandidate(row: RetrievalCandidateRow): RetrievalCandidate {
     content: row.content,
     embeddingProvider: row.embedding_provider,
     embeddingModel: row.embedding_model,
-    embeddingVector: parseEmbeddingVector(row.embedding_vector),
     updatedAt: row.updated_at
+  }
+}
+
+function mapVectorSearchResult(row: VectorSearchRow): VectorSearchResult {
+  return {
+    id: row.id,
+    candidateType: row.candidate_type,
+    sessionId: row.session_id,
+    sessionTitle: row.session_title,
+    sourceMessageId: row.source_message_id,
+    chunkKind: row.chunk_kind,
+    content: row.content,
+    embeddingProvider: row.embedding_provider,
+    embeddingModel: row.embedding_model,
+    updatedAt: row.updated_at,
+    distance: row.distance
   }
 }
 
@@ -122,6 +134,7 @@ function readSessionSummary(
           updated_at,
           embedding_provider,
           embedding_model,
+          embedding_dimension,
           embedding_vector
         FROM session_summaries
         WHERE session_id = ?
@@ -162,6 +175,8 @@ export function insertMemoryChunk(
   try {
     const id = randomUUID()
     const now = new Date().toISOString()
+    const vectorBlob = serializeFloat32Vector(input.embeddingVector)
+    const dimension = input.embeddingVector?.length ?? null
 
     database
       .prepare(
@@ -174,10 +189,11 @@ export function insertMemoryChunk(
             content,
             embedding_provider,
             embedding_model,
+            embedding_dimension,
             embedding_vector,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
       )
       .run(
@@ -188,7 +204,8 @@ export function insertMemoryChunk(
         input.content,
         input.embeddingProvider ?? null,
         input.embeddingModel ?? null,
-        serializeEmbeddingVector(input.embeddingVector),
+        dimension,
+        vectorBlob,
         now,
         now
       )
@@ -206,7 +223,6 @@ export function insertMemoryChunk(
             mc.content,
             mc.embedding_provider,
             mc.embedding_model,
-            mc.embedding_vector,
             mc.updated_at
           FROM memory_chunks mc
           INNER JOIN sessions s ON s.id = mc.session_id
@@ -237,6 +253,8 @@ export function upsertSessionSummary(
 
   try {
     const now = new Date().toISOString()
+    const vectorBlob = serializeFloat32Vector(input.embeddingVector)
+    const dimension = input.embeddingVector?.length ?? null
 
     database
       .prepare(
@@ -247,15 +265,17 @@ export function upsertSessionSummary(
             source_message_id,
             embedding_provider,
             embedding_model,
+            embedding_dimension,
             embedding_vector,
             turn_count_snapshot,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(session_id) DO UPDATE SET
             summary_text = excluded.summary_text,
             source_message_id = excluded.source_message_id,
             embedding_provider = excluded.embedding_provider,
             embedding_model = excluded.embedding_model,
+            embedding_dimension = excluded.embedding_dimension,
             embedding_vector = excluded.embedding_vector,
             turn_count_snapshot = excluded.turn_count_snapshot,
             updated_at = excluded.updated_at
@@ -267,7 +287,8 @@ export function upsertSessionSummary(
         input.sourceMessageId,
         input.embeddingProvider ?? null,
         input.embeddingModel ?? null,
-        serializeEmbeddingVector(input.embeddingVector),
+        dimension,
+        vectorBlob,
         input.turnCountSnapshot,
         now
       )
@@ -281,6 +302,7 @@ export function upsertSessionSummary(
         updatedAt: now,
         embeddingProvider: input.embeddingProvider ?? null,
         embeddingModel: input.embeddingModel ?? null,
+        embeddingDimension: dimension,
         embeddingVector: input.embeddingVector ?? null
       }
     )
@@ -306,7 +328,6 @@ export function listRetrievalCandidates(workspacePath: string): RetrievalCandida
             mc.content,
             mc.embedding_provider,
             mc.embedding_model,
-            mc.embedding_vector,
             mc.updated_at
           FROM memory_chunks mc
           INNER JOIN sessions s ON s.id = mc.session_id
@@ -323,7 +344,6 @@ export function listRetrievalCandidates(workspacePath: string): RetrievalCandida
             ss.summary_text AS content,
             ss.embedding_provider,
             ss.embedding_model,
-            ss.embedding_vector,
             ss.updated_at
           FROM session_summaries ss
           INNER JOIN sessions s ON s.id = ss.session_id
@@ -332,6 +352,99 @@ export function listRetrievalCandidates(workspacePath: string): RetrievalCandida
       .all() as unknown as RetrievalCandidateRow[]
 
     return rows.map(mapRetrievalCandidate)
+  } finally {
+    database.close()
+  }
+}
+
+/**
+ * Performs nearest-neighbor vector search using sqlite-vector's
+ * `vector_full_scan` function. Searches both memory chunks and session
+ * summaries, excluding the active session's summary.
+ *
+ * Requires the sqlite-vector extension to be loaded.
+ */
+export function searchMemoryByVector(
+  workspacePath: string,
+  input: {
+    activeSessionId: string
+    queryVector: number[]
+    limit: number
+    embeddingDimension: number
+  }
+): VectorSearchResult[] {
+  const database = openWorkspaceDatabase(workspacePath, {
+    embeddingDimension: input.embeddingDimension
+  })
+
+  try {
+    const queryBlob = serializeFloat32Vector(input.queryVector)
+
+    if (!queryBlob) {
+      return []
+    }
+
+    // Use streaming mode (no k argument) with LIMIT to avoid Node DatabaseSync
+    // binding JS numbers as REAL, which vector_full_scan rejects for the k param.
+    const perTableLimit = input.limit * 2
+
+    const chunkRows = database
+      .prepare(
+        `
+          SELECT
+            mc.id,
+            'memory_chunk' AS candidate_type,
+            mc.session_id,
+            s.title AS session_title,
+            mc.source_message_id,
+            mc.chunk_kind,
+            mc.content,
+            mc.embedding_provider,
+            mc.embedding_model,
+            mc.updated_at,
+            v.distance
+          FROM vector_full_scan('memory_chunks', 'embedding_vector', ?) AS v
+          JOIN memory_chunks AS mc ON mc.rowid = v.rowid
+          INNER JOIN sessions s ON s.id = mc.session_id
+          WHERE mc.embedding_vector IS NOT NULL
+          ORDER BY v.distance ASC
+          LIMIT ${perTableLimit}
+        `
+      )
+      .all(queryBlob) as unknown as VectorSearchRow[]
+
+    const summaryRows = database
+      .prepare(
+        `
+          SELECT
+            ss.session_id AS id,
+            'session_summary' AS candidate_type,
+            ss.session_id,
+            s.title AS session_title,
+            ss.source_message_id,
+            'session_summary' AS chunk_kind,
+            ss.summary_text AS content,
+            ss.embedding_provider,
+            ss.embedding_model,
+            ss.updated_at,
+            v.distance
+          FROM vector_full_scan('session_summaries', 'embedding_vector', ?) AS v
+          JOIN session_summaries AS ss ON ss.rowid = v.rowid
+          INNER JOIN sessions s ON s.id = ss.session_id
+          WHERE ss.embedding_vector IS NOT NULL
+            AND ss.session_id != ?
+          ORDER BY v.distance ASC
+          LIMIT ${perTableLimit}
+        `
+      )
+      .all(queryBlob, input.activeSessionId) as unknown as VectorSearchRow[]
+
+    const merged = [...chunkRows, ...summaryRows]
+      .map(mapVectorSearchResult)
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, input.limit)
+
+    return merged
   } finally {
     database.close()
   }

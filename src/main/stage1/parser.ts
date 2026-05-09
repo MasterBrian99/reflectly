@@ -46,8 +46,8 @@ const riskTypes = new Set<Stage1RiskType>([
 const riskSeverities = new Set<Stage1RiskSeverity>(['low', 'medium', 'high', 'critical'])
 const urgencyLevels = new Set<ClarificationUrgency>(['low', 'medium', 'high'])
 const stage1ModelAttempts = 2
-const stage1AttemptTimeoutMs = 30000
-const stage1ProviderMaxRetries = 2
+const stage1AttemptTimeoutMs = 45000
+const stage1ProviderMaxRetries = 1
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
